@@ -184,14 +184,21 @@ class PeerListener:
         elif frame_type == "control":
             content = f"[control action: {frame.get('action')}]"
 
+        to_name = frame.get("to") or self.name
+        to_pid = frame.get("to_pid") or self.pid
+
         record = {
             "from": from_sender,
+            "to": to_name,
+            "to_pid": to_pid,
+            "recipient_name": to_name,
+            "recipient_pid": to_pid,
             "priority": priority,
             "type": frame_type,
             "content": content,
             "raw": frame
         }
-        append_inbox(record, session_name=self.name, session_pid=self.pid)
+        append_inbox(record, session_name=to_name, session_pid=to_pid)
 
         # Extract cleaner sender label if present in XML tags or urgency brackets
         sender_label = from_sender

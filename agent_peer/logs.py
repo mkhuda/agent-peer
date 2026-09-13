@@ -130,15 +130,28 @@ def extract_sender_info(record: dict, session_cache: Dict[str, Dict[str, str]]) 
 
 def extract_recipient_info(record: dict, session_cache: Dict[str, Dict[str, str]]) -> Tuple[str, str]:
     """Extract readable recipient name and agent type."""
-    recip_name = record.get("recipient_name")
+    recip_name = record.get("recipient_name") or record.get("to")
+    if not recip_name and isinstance(record.get("raw"), dict):
+        recip_name = record["raw"].get("to")
+
     if not recip_name and record.get("recipient_pid"):
         pid_str = str(record["recipient_pid"])
         if pid_str in session_cache:
             recip_name = session_cache[pid_str]["name"]
         else:
             recip_name = f"pid-{pid_str}"
-    if not recip_name:
-        recip_name = "peer"
+
+    # Smart inference for legacy records where recipient wasn't explicitly logged
+    if not recip_name or recip_name == "peer":
+        sender_raw = record.get("from", "").lower()
+        content = record.get("content", "").lower()
+        if "72769" in sender_raw or "29258" in sender_raw or "from antigravity" in content:
+            recip_name = "antigravity-2"
+        elif "71277" in sender_raw or "from antigravity-2" in content:
+            recip_name = "antigravity"
+        else:
+            # Messages from Claude sessions (projects-00, fe, etc.) to the UDS mesh listener were addressed to antigravity
+            recip_name = "antigravity"
 
     agent_type = resolve_agent_type(recip_name, session_cache)
     return recip_name, agent_type

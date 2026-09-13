@@ -50,7 +50,14 @@ def generate_key_filename(pid: int, sock_path: str) -> str:
 def format_auth_frame(token: str) -> str:
     return json.dumps({"type": "auth", "token": token}) + "\n"
 
-def format_user_frame(content: str, from_name: str = "antigravity", from_sock: str = None, priority: str = "now") -> str:
+def format_user_frame(
+    content: str,
+    from_name: str = "antigravity",
+    from_sock: str = None,
+    priority: str = "now",
+    to_name: str = None,
+    to_pid: int = None
+) -> str:
     origin_from = f"uds:{from_sock}" if from_sock else from_name
     payload = {
         "type": "user",
@@ -60,4 +67,8 @@ def format_user_frame(content: str, from_name: str = "antigravity", from_sock: s
             "content": content
         }
     }
+    if to_name:
+        payload["to"] = to_name
+    if to_pid:
+        payload["to_pid"] = to_pid
     return json.dumps(payload) + "\n"

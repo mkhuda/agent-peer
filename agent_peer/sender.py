@@ -31,7 +31,9 @@ def send_message(
         content=content,
         from_name=from_name,
         from_sock=from_sock,
-        priority=priority
+        priority=priority,
+        to_name=session.get("name"),
+        to_pid=session.get("pid")
     )
 
     client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
