@@ -42,6 +42,22 @@ class PeerListener:
         proc_start = get_proc_start(self.pid)
         now_ms = int(time.time() * 1000)
 
+        # Ensure unique session name among currently active alive sessions
+        from .registry import get_active_sessions
+        active_sessions = get_active_sessions()
+        alive_names = {
+            (s.get("name") or "").lower(): s["pid"]
+            for s in active_sessions
+            if s.get("alive") and s.get("pid") != self.pid
+        }
+        if self.name.lower() in alive_names:
+            base_name = self.name
+            idx = 2
+            while f"{base_name}-{idx}".lower() in alive_names:
+                idx += 1
+            self.name = f"{base_name}-{idx}"
+            self.symlink_path = os.path.join(SOCKET_DIR, f"{self.name}.sock")
+
         # 1. Clean old socket if exists
         if os.path.exists(self.sock_path):
             try:

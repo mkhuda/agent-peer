@@ -86,13 +86,19 @@ def resolve_session(target: str) -> Tuple[Dict, str, str]:
 
     # Try exact name match
     target_lower = target.lower().strip()
-    for s in sessions:
-        name = (s.get("name") or "").lower().strip()
-        if name == target_lower and s["alive"]:
-            token = s.get("peerToken")
-            if not token:
-                raise ValueError(f"Session '{s.get('name')}' (PID {s['pid']}) has no peerToken.")
-            return s, s["messagingSocketPath"], token
+    exact_matches = [
+        s for s in sessions
+        if (s.get("name") or "").lower().strip() == target_lower and s["alive"]
+    ]
+    if len(exact_matches) == 1:
+        s = exact_matches[0]
+        token = s.get("peerToken")
+        if not token:
+            raise ValueError(f"Session '{s.get('name')}' (PID {s['pid']}) has no peerToken.")
+        return s, s["messagingSocketPath"], token
+    elif len(exact_matches) > 1:
+        names = [f"PID {m['pid']}" for m in exact_matches]
+        raise ValueError(f"Ambiguous target '{target}'. Multiple active sessions share this name: {', '.join(names)}. Target by PID instead (e.g. agent-peer send <pid>).")
 
     # Try partial name match / alias
     matches = []
