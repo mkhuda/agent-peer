@@ -8,6 +8,7 @@ from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message
+from .logs import show_logs
 
 def cmd_list(args):
     sessions = get_active_sessions()
@@ -90,6 +91,18 @@ def cmd_wait(args):
         print("Timeout waiting for message.")
         sys.exit(1)
 
+def cmd_logs(args):
+    """View full detailed message logs with color formatting and live tail."""
+    limit = 0 if args.all else args.limit
+    show_logs(
+        limit=limit,
+        session=args.session,
+        follow=args.follow,
+        query=args.query,
+        raw=args.raw,
+        no_color=args.no_color
+    )
+
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-peer",
@@ -126,6 +139,17 @@ def main():
     p_wait.add_argument("--name", "--session", dest="session", default=None, help="Wait specifically for messages sent to this session name or PID")
     p_wait.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
     p_wait.set_defaults(func=cmd_wait)
+
+    # logs / log
+    p_logs = subparsers.add_parser("logs", aliases=["log"], help="View formatted full message logs directly in terminal")
+    p_logs.add_argument("-n", "--limit", type=int, default=20, help="Number of messages to display (default: 20)")
+    p_logs.add_argument("-a", "--all", action="store_true", help="Show all message history without limit")
+    p_logs.add_argument("-f", "--follow", action="store_true", help="Live stream new messages in real-time (like tail -f)")
+    p_logs.add_argument("-s", "--name", "--session", dest="session", default=None, help="Filter messages by session name or PID")
+    p_logs.add_argument("-q", "--grep", "--query", dest="query", default=None, help="Search messages containing keyword")
+    p_logs.add_argument("--raw", action="store_true", help="Output raw unformatted JSON lines")
+    p_logs.add_argument("--no-color", action="store_true", help="Disable ANSI color codes")
+    p_logs.set_defaults(func=cmd_logs)
 
     args = parser.parse_args()
     args.func(args)
