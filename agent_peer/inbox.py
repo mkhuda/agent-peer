@@ -33,3 +33,14 @@ def clear_inbox():
     if os.path.exists(INBOX_FILE):
         with open(INBOX_FILE, "w", encoding="utf-8") as f:
             f.write("")
+
+def wait_for_message(timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    initial_count = len(read_inbox())
+    t0 = time.time()
+    while True:
+        msgs = read_inbox()
+        if len(msgs) > initial_count:
+            return msgs[-1]
+        if timeout is not None and (time.time() - t0) >= timeout:
+            return None
+        time.sleep(0.1)

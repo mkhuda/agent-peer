@@ -6,6 +6,7 @@ import uuid
 import socket
 import signal
 import threading
+import subprocess
 from typing import Optional
 
 from .protocol import (
@@ -174,7 +175,51 @@ class PeerListener:
             "raw": frame
         }
         append_inbox(record)
-        print(f"\n⚡ [MESSAGE RECEIVED] From: {from_sender} (Priority: {priority})")
+
+        # Extract cleaner sender label if present in XML tags
+        sender_label = from_sender
+        import re
+        m = re.search(r'from-name="([^"]+)"', content)
+        if m:
+            sender_label = m.group(1)
+        elif from_sender.startswith("uds:") and "cc-socks" in from_sender:
+            sender_label = os.path.basename(from_sender).replace(".sock", "")
+
+        # Clean snippet for notifications and status line
+        clean_snippet = re.sub(r'<[^>]+>', '', content) # strip xml tags
+        clean_snippet = re.sub(r'\[fyi.*?\]|\[change.*?\]|\[stop.*?\]', '', clean_snippet) # strip urgency headers
+        clean_snippet = " ".join(clean_snippet.split())[:90]
+
+        # 1. Update session json with title & status (agent-ps sees this!)
+        try:
+            if os.path.exists(self.json_path):
+                with open(self.json_path, "r", encoding="utf-8") as f:
+                    meta = json.load(f)
+                meta["title"] = f"📬 [{sender_label}]: {clean_snippet}"
+                meta["status"] = "new-msg"
+                meta["updatedAt"] = int(time.time() * 1000)
+                meta["statusUpdatedAt"] = int(time.time() * 1000)
+                with open(self.json_path, "w", encoding="utf-8") as f:
+                    json.dump(meta, f)
+        except Exception:
+            pass
+
+        # 2. Trigger native macOS banner notification with sound
+        try:
+            escaped_snippet = clean_snippet.replace('"', '\\"')
+            escaped_title = f"📬 Message from {sender_label}".replace('"', '\\"')
+            script = f'display notification "{escaped_snippet}" with title "{escaped_title}" sound name "Glass"'
+            subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+        # 3. Set terminal window/tab title via OSC escape sequence
+        try:
+            sys.stdout.write(f"\033]0;📬 [{sender_label}]: {clean_snippet}\007")
+        except Exception:
+            pass
+
+        print(f"\n⚡ [MESSAGE RECEIVED] From: {sender_label} (Priority: {priority})")
         print(f"   {content}\n")
         sys.stdout.flush()
 

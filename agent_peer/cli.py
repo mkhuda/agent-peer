@@ -7,7 +7,7 @@ import time
 from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
-from .inbox import read_inbox, clear_inbox
+from .inbox import read_inbox, clear_inbox, wait_for_message
 
 def cmd_list(args):
     sessions = get_active_sessions()
@@ -74,6 +74,17 @@ def cmd_inbox(args):
         print(f"[{iso}] From: {sender} (Priority: {prio})")
         print(f"   {content}\n")
 
+def cmd_wait(args):
+    """Wait until a new message arrives in the inbox, then print it and exit 0 (triggering agent wakeup)."""
+    timeout = args.timeout if args.timeout > 0 else None
+    msg = wait_for_message(timeout=timeout)
+    if msg:
+        print(f"📬 [NEW MESSAGE from {msg.get('from')}]: {msg.get('content')}")
+        sys.exit(0)
+    else:
+        print("Timeout waiting for message.")
+        sys.exit(1)
+
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-peer",
@@ -103,6 +114,11 @@ def main():
     p_inbox.add_argument("--limit", type=int, default=20, help="Number of messages to show (default: 20)")
     p_inbox.add_argument("--clear", action="store_true", help="Clear all messages in inbox")
     p_inbox.set_defaults(func=cmd_inbox)
+
+    # wait
+    p_wait = subparsers.add_parser("wait", help="Wait for next incoming message and exit 0 (reactive agent trigger)")
+    p_wait.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
+    p_wait.set_defaults(func=cmd_wait)
 
     args = parser.parse_args()
     args.func(args)
