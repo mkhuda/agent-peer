@@ -98,6 +98,7 @@ class PeerListener:
             "procStart": proc_start,
             "version": "2.1.270",
             "peerProtocol": 1,
+            "agentType": "AGY",
             "peerFeatures": [
                 "notify_idle",
                 "reply_across_default_dirs",

@@ -9,6 +9,15 @@ from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
 PID_JSON_RE = re.compile(r"^(\d+)\.json$")
 KEY_FILE_RE = re.compile(r"^(\d+)\.[0-9a-f]{64}\.key$")
 
+def get_session_agent_type(session_data: dict) -> str:
+    """Determine if session is 'AGY' (Google Antigravity) or 'Claude' (Claude Code)."""
+    if session_data.get("agentType"):
+        return session_data["agentType"].upper()
+    name = (session_data.get("name") or "").lower()
+    if "antigravity" in name or "agy" in name:
+        return "AGY"
+    return "Claude"
+
 def get_active_sessions() -> List[Dict]:
     """Discover all active sessions registered in ~/.claude/sessions/"""
     sessions = []
@@ -36,6 +45,7 @@ def get_active_sessions() -> List[Dict]:
 
         data["pid"] = pid
         data["alive"] = alive
+        data["agentType"] = get_session_agent_type(data)
 
         # Find key file
         key_files = glob.glob(os.path.join(SESSIONS_DIR, f"{pid}.*.key"))

@@ -45,60 +45,103 @@ def supports_color() -> bool:
         return False
     return sys.stdout.isatty()
 
-def get_session_cache() -> Dict[int, str]:
-    """Map PID to session name from registry."""
+def get_session_cache() -> Dict[str, Dict[str, str]]:
+    """Map PID and lower session name to {name, type, pid} info."""
     cache = {}
     try:
         sessions = get_active_sessions()
         for s in sessions:
             pid = s.get("pid")
-            name = s.get("name")
-            if pid and name:
-                cache[pid] = name
+            name = s.get("name") or f"pid-{pid}"
+            agent_type = s.get("agentType") or ("AGY" if "antigravity" in name.lower() or "agy" in name.lower() else "Claude")
+            info = {
+                "name": name,
+                "type": agent_type,
+                "pid": str(pid) if pid else ""
+            }
+            if pid:
+                cache[str(pid)] = info
+            cache[name.lower()] = info
     except Exception:
         pass
     return cache
 
-def extract_sender_info(record: dict, session_cache: Dict[int, str]) -> Tuple[str, str]:
+def resolve_agent_type(name: str, cache: Dict[str, Dict[str, str]]) -> str:
+    """Infer whether session is AGY or Claude."""
+    clean = name.lower().strip()
+    if clean in cache:
+        return cache[clean].get("type", "Claude")
+    m = re.search(r'(\d+)', clean)
+    if m and m.group(1) in cache:
+        return cache[m.group(1)].get("type", "Claude")
+    if "antigravity" in clean or "agy" in clean:
+        return "AGY"
+    if clean and clean not in ("peer", "unknown", "all"):
+        return "Claude"
+    return ""
+
+def format_agent_badge(agent_type: str, use_color: bool = True) -> str:
+    """Generate subtle colored badge for AGY or Claude."""
+    if not agent_type:
+        return ""
+    if use_color:
+        if agent_type.upper() == "AGY":
+            return f"{BRIGHT_BLUE}[AGY]{RESET}"
+        elif agent_type.upper() == "CLAUDE":
+            return f"{BRIGHT_YELLOW}[Claude]{RESET}"
+        return f"{DIM}[{agent_type}]{RESET}"
+    return f"[{agent_type}]"
+
+def extract_sender_info(record: dict, session_cache: Dict[str, Dict[str, str]]) -> Tuple[str, str, str]:
     """
-    Extract readable sender name and raw origin.
-    Returns: (display_name, raw_from)
+    Extract readable sender name, raw origin, and agent type.
+    Returns: (display_name, raw_from, agent_type)
     """
     raw_from = record.get("from", "unknown")
     content = record.get("content", "")
+    sender_name = ""
 
     # 1. XML attribute: from-name="XYZ"
     m_xml = re.search(r'from-name="([^"]+)"', content)
     if m_xml:
-        return m_xml.group(1).strip(), raw_from
+        sender_name = m_xml.group(1).strip()
 
     # 2. Urgency header: [fyi from XYZ] or [change from XYZ]
-    m_urgency = re.search(r'\[(?:fyi|change|stop)\s+from\s+([^\]:]+)\]', content, re.IGNORECASE)
-    if m_urgency:
-        return m_urgency.group(1).strip(), raw_from
+    if not sender_name:
+        m_urgency = re.search(r'\[(?:fyi|change|stop)\s+from\s+([^\]:]+)\]', content, re.IGNORECASE)
+        if m_urgency:
+            sender_name = m_urgency.group(1).strip()
 
     # 3. Socket PID resolution
-    m_sock = re.search(r'(\d+)\.sock', raw_from)
-    if m_sock:
-        pid = int(m_sock.group(1))
-        if pid in session_cache:
-            return session_cache[pid], raw_from
-        return f"pid-{pid}", raw_from
+    if not sender_name:
+        m_sock = re.search(r'(\d+)\.sock', raw_from)
+        if m_sock:
+            pid_str = m_sock.group(1)
+            if pid_str in session_cache:
+                sender_name = session_cache[pid_str]["name"]
+            else:
+                sender_name = f"pid-{pid_str}"
 
-    # Clean generic uds: prefix
-    clean_name = raw_from.replace("uds:", "").replace("/tmp/cc-socks/", "")
-    return clean_name, raw_from
+    if not sender_name:
+        sender_name = raw_from.replace("uds:", "").replace("/tmp/cc-socks/", "")
 
-def extract_recipient_info(record: dict, session_cache: Dict[int, str]) -> str:
-    """Extract readable recipient name."""
-    if record.get("recipient_name"):
-        return record["recipient_name"]
-    if record.get("recipient_pid"):
-        pid = record["recipient_pid"]
-        if pid in session_cache:
-            return session_cache[pid]
-        return f"pid-{pid}"
-    return "peer"
+    agent_type = resolve_agent_type(sender_name, session_cache)
+    return sender_name, raw_from, agent_type
+
+def extract_recipient_info(record: dict, session_cache: Dict[str, Dict[str, str]]) -> Tuple[str, str]:
+    """Extract readable recipient name and agent type."""
+    recip_name = record.get("recipient_name")
+    if not recip_name and record.get("recipient_pid"):
+        pid_str = str(record["recipient_pid"])
+        if pid_str in session_cache:
+            recip_name = session_cache[pid_str]["name"]
+        else:
+            recip_name = f"pid-{pid_str}"
+    if not recip_name:
+        recip_name = "peer"
+
+    agent_type = resolve_agent_type(recip_name, session_cache)
+    return recip_name, agent_type
 
 def clean_message_content(content: str) -> str:
     """Strip XML wrappers while preserving inner markdown text."""
@@ -109,12 +152,12 @@ def clean_message_content(content: str) -> str:
         content = m.group(1).strip()
     return content
 
-def format_log_entry(record: dict, session_cache: Dict[int, str], use_color: bool = True) -> str:
+def format_log_entry(record: dict, session_cache: Dict[str, Dict[str, str]], use_color: bool = True) -> str:
     """Format a single message record into a beautifully styled terminal card."""
     iso = record.get("received_iso", "-")
     priority = record.get("priority", "now")
-    sender, raw_from = extract_sender_info(record, session_cache)
-    recipient = extract_recipient_info(record, session_cache)
+    sender, raw_from, sender_type = extract_sender_info(record, session_cache)
+    recipient, recip_type = extract_recipient_info(record, session_cache)
     raw_content = record.get("content", "")
     content = clean_message_content(raw_content)
 
@@ -133,11 +176,18 @@ def format_log_entry(record: dict, session_cache: Dict[int, str], use_color: boo
         elif tag_word == "fyi":
             urgency_tag = f"{BRIGHT_CYAN}[FYI]{RESET}" if use_color else "[FYI]"
 
+    s_badge = format_agent_badge(sender_type, use_color)
+    r_badge = format_agent_badge(recip_type, use_color)
+
     if use_color:
         time_str = f"{DIM}{iso}{RESET}"
         from_str = f"{BOLD}{BRIGHT_CYAN}{sender}{RESET}"
+        if s_badge:
+            from_str += f" {s_badge}"
         arrow_str = f"{DIM}──►{RESET}"
         to_str = f"{BOLD}{BRIGHT_GREEN}{recipient}{RESET}"
+        if r_badge:
+            to_str += f" {r_badge}"
         
         # Priority color
         if priority == "now":
@@ -156,7 +206,9 @@ def format_log_entry(record: dict, session_cache: Dict[int, str], use_color: boo
     else:
         div_bar = "━" * divider_len
         sub_div = "─" * divider_len
-        header = f" 🕒 {iso}  |  {sender}  -->  {recipient}  |  Priority: {priority}"
+        from_str = f"{sender} {s_badge}".strip()
+        to_str = f"{recipient} {r_badge}".strip()
+        header = f" 🕒 {iso}  |  {from_str}  -->  {to_str}  |  Priority: {priority}"
         if urgency_tag:
             header += f"  {urgency_tag}"
 

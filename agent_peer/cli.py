@@ -16,11 +16,12 @@ def cmd_list(args):
         print("No active Claude Code sessions found.")
         return
 
-    print(f"{'PID':<8} {'SESSION NAME':<24} {'STATUS':<8} {'ALIVE':<6} {'SOCKET':<28} {'CWD'}")
-    print("-" * 100)
+    print(f"{'PID':<8} {'SESSION NAME':<24} {'ENGINE':<8} {'STATUS':<8} {'ALIVE':<6} {'SOCKET':<28} {'CWD'}")
+    print("-" * 110)
     for s in sessions:
         pid = str(s.get("pid", ""))
         name = s.get("name") or "(untitled)"
+        engine = s.get("agentType", "Claude")
         status = s.get("status") or "-"
         alive = "yes" if s.get("alive") else "no"
         sock = os.path.basename(s.get("messagingSocketPath", ""))
@@ -31,7 +32,7 @@ def cmd_list(args):
             cwd = "~" + cwd[len(home):]
         if len(cwd) > 30:
             cwd = "..." + cwd[-27:]
-        print(f"{pid:<8} {name:<24} {status:<8} {alive:<6} {sock:<28} {cwd}")
+        print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}")
     print(f"\nTotal: {len(sessions)} sessions registered in ~/.claude/sessions/")
 
 def cmd_send(args):
