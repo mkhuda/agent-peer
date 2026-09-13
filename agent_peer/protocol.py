@@ -9,11 +9,17 @@ SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
 SOCKET_DIR = "/tmp/cc-socks"
 AGENT_PEER_DIR = os.path.expanduser("~/.agent-peer")
 INBOX_FILE = os.path.join(AGENT_PEER_DIR, "inbox.jsonl")
+INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
 
 def ensure_dirs():
     os.makedirs(AGENT_PEER_DIR, exist_ok=True)
+    os.makedirs(INBOXES_DIR, exist_ok=True)
     os.makedirs(SOCKET_DIR, exist_ok=True)
     os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+def get_session_inbox_path(session_id_or_name: str) -> str:
+    ensure_dirs()
+    return os.path.join(INBOXES_DIR, f"{session_id_or_name}.jsonl")
 
 def get_proc_start(pid: int) -> str:
     """Get process start time matching Claude Code's Lue() format: LC_ALL=C TZ=UTC ps -o lstart= -p <pid>"""

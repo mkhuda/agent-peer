@@ -190,20 +190,23 @@ class PeerListener:
             "content": content,
             "raw": frame
         }
-        append_inbox(record)
+        append_inbox(record, session_name=self.name, session_pid=self.pid)
 
-        # Extract cleaner sender label if present in XML tags
+        # Extract cleaner sender label if present in XML tags or urgency brackets
         sender_label = from_sender
         import re
-        m = re.search(r'from-name="([^"]+)"', content)
-        if m:
-            sender_label = m.group(1)
+        m_xml = re.search(r'from-name="([^"]+)"', content)
+        m_bracket = re.search(r'\[(?:fyi|change|stop)\s+from\s+([^\]:]+)\]', content, re.IGNORECASE)
+        if m_xml:
+            sender_label = m_xml.group(1)
+        elif m_bracket:
+            sender_label = m_bracket.group(1).strip()
         elif from_sender.startswith("uds:") and "cc-socks" in from_sender:
             sender_label = os.path.basename(from_sender).replace(".sock", "")
 
         # Clean snippet for notifications and status line
         clean_snippet = re.sub(r'<[^>]+>', '', content) # strip xml tags
-        clean_snippet = re.sub(r'\[fyi.*?\]|\[change.*?\]|\[stop.*?\]', '', clean_snippet) # strip urgency headers
+        clean_snippet = re.sub(r'\[(?:fyi|change|stop).*?\]:?\s*', '', clean_snippet, flags=re.IGNORECASE) # strip urgency headers and colon
         clean_snippet = " ".join(clean_snippet.split())[:90]
 
         # 1. Update session json with title & status (agent-ps sees this!)

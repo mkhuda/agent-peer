@@ -55,17 +55,20 @@ def cmd_listen(args):
     listener.run()
 
 def cmd_inbox(args):
+    session = args.session or os.environ.get("AGENT_PEER_NAME")
     if args.clear:
-        clear_inbox()
-        print("Inbox cleared.")
+        clear_inbox(session=session)
+        print(f"Inbox for '{session or 'all'}' cleared.")
         return
 
-    messages = read_inbox(limit=args.limit)
+    messages = read_inbox(session=session, limit=args.limit)
     if not messages:
-        print("Inbox is empty.")
+        target_label = f" for '{session}'" if session else ""
+        print(f"Inbox{target_label} is empty.")
         return
 
-    print(f"📬 Recent messages ({len(messages)}):\n")
+    target_label = f" for '{session}'" if session else ""
+    print(f"📬 Recent messages{target_label} ({len(messages)}):\n")
     for m in messages:
         iso = m.get("received_iso", "-")
         sender = m.get("from", "unknown")
@@ -77,9 +80,11 @@ def cmd_inbox(args):
 def cmd_wait(args):
     """Wait until a new message arrives in the inbox, then print it and exit 0 (triggering agent wakeup)."""
     timeout = args.timeout if args.timeout > 0 else None
-    msg = wait_for_message(timeout=timeout)
+    session = args.session or os.environ.get("AGENT_PEER_NAME")
+    msg = wait_for_message(session=session, timeout=timeout)
     if msg:
-        print(f"📬 [NEW MESSAGE from {msg.get('from')}]: {msg.get('content')}")
+        from_label = msg.get("from", "unknown")
+        print(f"📬 [NEW MESSAGE from {from_label}]: {msg.get('content')}")
         sys.exit(0)
     else:
         print("Timeout waiting for message.")
@@ -101,7 +106,7 @@ def main():
     p_send.add_argument("target", help="Target session name or PID (e.g. projects-00, fe, 22748)")
     p_send.add_argument("message", help="Message text to send")
     p_send.add_argument("--priority", choices=["now", "next", "later"], default="now", help="Delivery priority (default: now)")
-    p_send.add_argument("--sender", default="antigravity", help="Sender identity name (default: antigravity)")
+    p_send.add_argument("--sender", default=os.environ.get("AGENT_PEER_NAME", "antigravity"), help="Sender identity name (default: antigravity or $AGENT_PEER_NAME)")
     p_send.set_defaults(func=cmd_send)
 
     # listen
@@ -111,12 +116,14 @@ def main():
 
     # inbox
     p_inbox = subparsers.add_parser("inbox", help="View received messages")
+    p_inbox.add_argument("--name", "--session", dest="session", default=None, help="Filter inbox by session name or PID (default: all)")
     p_inbox.add_argument("--limit", type=int, default=20, help="Number of messages to show (default: 20)")
     p_inbox.add_argument("--clear", action="store_true", help="Clear all messages in inbox")
     p_inbox.set_defaults(func=cmd_inbox)
 
     # wait
     p_wait = subparsers.add_parser("wait", help="Wait for next incoming message and exit 0 (reactive agent trigger)")
+    p_wait.add_argument("--name", "--session", dest="session", default=None, help="Wait specifically for messages sent to this session name or PID")
     p_wait.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
     p_wait.set_defaults(func=cmd_wait)
 
