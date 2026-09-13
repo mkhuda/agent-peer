@@ -104,6 +104,11 @@ def cmd_logs(args):
         no_color=args.no_color
     )
 
+def cmd_watch(args):
+    """Watch incoming peer messages in real-time (live stream)."""
+    args.follow = True
+    cmd_logs(args)
+
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-peer",
@@ -145,12 +150,22 @@ def main():
     p_logs = subparsers.add_parser("logs", aliases=["log"], help="View formatted full message logs directly in terminal")
     p_logs.add_argument("-n", "--limit", type=int, default=20, help="Number of messages to display (default: 20)")
     p_logs.add_argument("-a", "--all", action="store_true", help="Show all message history without limit")
-    p_logs.add_argument("-f", "--follow", action="store_true", help="Live stream new messages in real-time (like tail -f)")
+    p_logs.add_argument("-f", "-w", "--follow", "--watch", dest="follow", action="store_true", help="Live stream / watch new messages in real-time (like tail -f)")
     p_logs.add_argument("-s", "--name", "--session", dest="session", default=None, help="Filter messages by session name or PID")
     p_logs.add_argument("-q", "--grep", "--query", dest="query", default=None, help="Search messages containing keyword")
     p_logs.add_argument("--raw", action="store_true", help="Output raw unformatted JSON lines")
     p_logs.add_argument("--no-color", action="store_true", help="Disable ANSI color codes")
     p_logs.set_defaults(func=cmd_logs)
+
+    # watch
+    p_watch = subparsers.add_parser("watch", help="Watch incoming peer messages in real-time (live stream)")
+    p_watch.add_argument("-n", "--limit", type=int, default=10, help="Number of recent messages to show (default: 10)")
+    p_watch.add_argument("-a", "--all", action="store_true", help="Show all previous messages before watching")
+    p_watch.add_argument("-s", "--name", "--session", dest="session", default=None, help="Filter messages by session name or PID")
+    p_watch.add_argument("-q", "--grep", "--query", dest="query", default=None, help="Search messages containing keyword")
+    p_watch.add_argument("--raw", action="store_true", help="Output raw unformatted JSON lines")
+    p_watch.add_argument("--no-color", action="store_true", help="Disable ANSI color codes")
+    p_watch.set_defaults(func=cmd_watch)
 
     args = parser.parse_args()
     args.func(args)
