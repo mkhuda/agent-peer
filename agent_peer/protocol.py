@@ -36,10 +36,10 @@ def generate_peer_token() -> str:
     """Generate 32 hex chars (16 bytes) peer token."""
     return secrets.token_hex(16)
 
-def generate_key_filename(pid: int) -> str:
-    """Generate <pid>.<64-hex-chars>.key filename."""
-    token_salt = secrets.token_hex(32)
-    return f"{pid}.{token_salt}.key"
+def generate_key_filename(pid: int, sock_path: str) -> str:
+    """Generate <pid>.<sha256(sock_path)>.key filename matching Claude Code's ZB()."""
+    h = hashlib.sha256(sock_path.encode("utf-8")).hexdigest()
+    return f"{pid}.{h}.key"
 
 def format_auth_frame(token: str) -> str:
     return json.dumps({"type": "auth", "token": token}) + "\n"

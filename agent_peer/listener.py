@@ -25,9 +25,9 @@ class PeerListener:
         self.cwd = cwd or os.path.expanduser("~/projects")
         self.session_id = str(uuid.uuid4())
         self.peer_token = generate_peer_token()
-        self.key_filename = generate_key_filename(self.pid)
         self.sock_path = os.path.join(SOCKET_DIR, f"{self.pid}.sock")
         self.symlink_path = os.path.join(SOCKET_DIR, f"{self.name}.sock")
+        self.key_filename = generate_key_filename(self.pid, self.sock_path)
         
         self.json_path = os.path.join(SESSIONS_DIR, f"{self.pid}.json")
         self.key_path = os.path.join(SESSIONS_DIR, self.key_filename)
@@ -139,16 +139,13 @@ class PeerListener:
                     except Exception:
                         continue
 
-                    # First frame must be auth
-                    if not authenticated:
-                        if frame.get("type") == "auth" and frame.get("token") == self.peer_token:
+                    # Handle auth frame
+                    if frame.get("type") == "auth":
+                        if frame.get("token") == self.peer_token:
                             authenticated = True
-                        else:
-                            # Bad auth frame, drop connection
-                            return
                         continue
 
-                    # Subsequent frames
+                    # Handle user/control frames
                     self.process_incoming_frame(frame)
         except Exception:
             pass
