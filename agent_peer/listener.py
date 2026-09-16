@@ -5,8 +5,14 @@ import time
 import uuid
 import socket
 import signal
+import shutil
 import threading
 import subprocess
+
+# Bundle id to activate when a notification is clicked (terminal-notifier path only).
+# osascript's own 'display notification' always attributes clicks to Script Editor.app
+# instead of the caller, regardless of script content - see docs/notification-click-target.md.
+NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"
 from typing import Optional
 
 from .protocol import (
@@ -17,13 +23,14 @@ from .protocol import (
     generate_peer_token,
     generate_key_filename
 )
-from .inbox import append_inbox
+from .inbox import append_inbox, mark_session_start
 
 class PeerListener:
-    def __init__(self, name: str = "antigravity", cwd: Optional[str] = None):
+    def __init__(self, name: str = "antigravity", cwd: Optional[str] = None, agent_type: Optional[str] = None):
         self.name = name
+        self.agent_type = agent_type or "AGENT"
         self.pid = os.getpid()
-        self.cwd = cwd or os.path.expanduser("~/projects")
+        self.cwd = cwd or os.getcwd()
         self.session_id = str(uuid.uuid4())
         self.peer_token = generate_peer_token()
         self.sock_path = os.path.join(SOCKET_DIR, f"{self.pid}.sock")
@@ -98,7 +105,7 @@ class PeerListener:
             "procStart": proc_start,
             "version": "2.1.270",
             "peerProtocol": 1,
-            "agentType": "AGY",
+            "agentType": self.agent_type,
             "peerFeatures": [
                 "notify_idle",
                 "reply_across_default_dirs",
@@ -117,6 +124,13 @@ class PeerListener:
         }
         with open(self.json_path, "w", encoding="utf-8") as f:
             json.dump(session_data, f)
+
+        # Cursor baseline: nothing received before this point can possibly be
+        # processed yet (accept() only starts in run(), called after setup()
+        # returns), so this is always earlier than any message this session
+        # will actually see - closing the gap where a message sent before this
+        # session's first-ever `wait` call would otherwise be missed.
+        mark_session_start(self.name)
 
     def cleanup(self):
         if self._cleaned_up:
@@ -161,6 +175,10 @@ class PeerListener:
                     if frame.get("type") == "auth":
                         if frame.get("token") == self.peer_token:
                             authenticated = True
+                        continue
+
+                    # Reject anything sent before a valid auth frame
+                    if not authenticated:
                         continue
 
                     # Handle user/control frames
@@ -231,12 +249,23 @@ class PeerListener:
         except Exception:
             pass
 
-        # 2. Trigger native macOS banner notification with sound
+        # 2. Trigger native macOS banner notification with sound.
+        # Prefer terminal-notifier so clicking activates NOTIFY_ACTIVATE_BUNDLE_ID
+        # directly - osascript's own notifications always click through to Script
+        # Editor.app instead, no matter what the script does.
         try:
-            escaped_snippet = clean_snippet.replace('"', '\\"')
-            escaped_title = f"📬 Message from {sender_label}".replace('"', '\\"')
-            script = f'display notification "{escaped_snippet}" with title "{escaped_title}" sound name "Glass"'
-            subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            title = f"📬 Message from {sender_label}"
+            if shutil.which("terminal-notifier"):
+                subprocess.Popen(
+                    ["terminal-notifier", "-title", title, "-message", clean_snippet,
+                     "-activate", NOTIFY_ACTIVATE_BUNDLE_ID, "-sound", "Glass"],
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL
+                )
+            else:
+                escaped_snippet = clean_snippet.replace('"', '\\"')
+                escaped_title = title.replace('"', '\\"')
+                script = f'display notification "{escaped_snippet}" with title "{escaped_title}" sound name "Glass"'
+                subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 

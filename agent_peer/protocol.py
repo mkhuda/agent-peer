@@ -10,16 +10,35 @@ SOCKET_DIR = "/tmp/cc-socks"
 AGENT_PEER_DIR = os.path.expanduser("~/.agent-peer")
 INBOX_FILE = os.path.join(AGENT_PEER_DIR, "inbox.jsonl")
 INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
+CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
+LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 
 def ensure_dirs():
-    os.makedirs(AGENT_PEER_DIR, exist_ok=True)
-    os.makedirs(INBOXES_DIR, exist_ok=True)
+    # Only our own directories are locked to owner-only (0700) - SOCKET_DIR and
+    # SESSIONS_DIR are shared with Claude Code's own native protocol, not ours
+    # to restrict.
+    for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR):
+        os.makedirs(d, exist_ok=True)
+        try:
+            os.chmod(d, 0o700)
+        except OSError:
+            pass
     os.makedirs(SOCKET_DIR, exist_ok=True)
     os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 def get_session_inbox_path(session_id_or_name: str) -> str:
     ensure_dirs()
     return os.path.join(INBOXES_DIR, f"{session_id_or_name}.jsonl")
+
+def get_cursor_path(session_id_or_name: str = None) -> str:
+    ensure_dirs()
+    key = str(session_id_or_name) if session_id_or_name else "_global"
+    return os.path.join(CURSORS_DIR, f"{key}.json")
+
+def get_lock_path(session_id_or_name: str = None) -> str:
+    ensure_dirs()
+    key = str(session_id_or_name) if session_id_or_name else "_global"
+    return os.path.join(LOCKS_DIR, f"{key}.lock")
 
 def get_proc_start(pid: int) -> str:
     """Get process start time matching Claude Code's Lue() format: LC_ALL=C TZ=UTC ps -o lstart= -p <pid>"""
@@ -37,6 +56,48 @@ def is_pid_alive(pid: int) -> bool:
         return True
     except (OSError, ProcessLookupError):
         return False
+
+# Generic shell/interpreter process names to skip while walking up the parent
+# chain looking for the actual harness (agy, pi, opencode, ...) that invoked us.
+_GENERIC_PROC_NAMES = {
+    "zsh", "bash", "sh", "dash", "tcsh", "csh", "ksh", "fish",
+    "login", "env", "sudo", "su", "node", "uv", "uvx", "python", "python3",
+}
+
+def _ps_field(pid: int, field: str) -> str:
+    try:
+        out = subprocess.check_output(["ps", "-o", f"{field}=", "-p", str(pid)], stderr=subprocess.DEVNULL)
+        return out.decode("utf-8").strip()
+    except Exception:
+        return ""
+
+def detect_harness_identity(max_depth: int = 6):
+    """
+    Walk up the parent-process chain past generic shell/interpreter wrappers to
+    find the actual agent harness (agy, pi, opencode, ...) that invoked this
+    command. Returns (name, pid) of the first non-generic ancestor found, or
+    (None, None) if nothing distinctive turns up within max_depth hops.
+    """
+    pid = os.getppid()
+    for _ in range(max_depth):
+        if pid <= 1:
+            break
+        comm = _ps_field(pid, "comm")
+        base = os.path.basename(comm) if comm else ""
+        if base and base.lower() not in _GENERIC_PROC_NAMES and not base.lower().startswith("python3."):
+            return base, pid
+        ppid_str = _ps_field(pid, "ppid")
+        if not ppid_str.isdigit():
+            break
+        pid = int(ppid_str)
+    return None, None
+
+def auto_session_name() -> str:
+    """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'."""
+    name, pid = detect_harness_identity()
+    if name:
+        return f"{name}-{pid}"
+    return f"agent-{os.getpid()}"
 
 def generate_peer_token() -> str:
     """Generate 32 hex chars (16 bytes) peer token."""
