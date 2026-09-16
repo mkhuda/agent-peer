@@ -80,6 +80,12 @@ the parent-process chain, skips generic shells/interpreters (`zsh`, `bash`,
 configuration, `opencode` as `opencode-<pid>`, and so on. Explicit `--name` /
 `--sender` / `$AGENT_PEER_NAME` always take priority when given.
 
+**Teaching a harness about `agent-peer`.** [`skills/`](./skills) ships a ready
+`SKILL.md` per harness (agy, pi, opencode) plus a README explaining exactly
+where and how to install it for that harness — each one has a different
+convention for skill location, frontmatter, and trigger mechanism, verified
+against its own source/docs rather than assumed.
+
 ### 4. React to messages without polling (`wait`)
 
 ```bash
