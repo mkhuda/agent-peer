@@ -7,20 +7,20 @@ Written by the owner. Read by every session at start. Changes rarely.
 `agent-peer` is a local IPC mesh so any agent harness (Claude Code, Antigravity/agy,
 pi, opencode, others later) can discover, message, and reactively wake up any other
 harness session on the same machine — no polling, no per-harness configuration. For
-the owner (rg): pakai agent-peer sehari-hari, lintas harness, tanpa was-was ada bug
-tersembunyi yang baru ketahuan pas dipakai beneran.
+the owner (rg): use agent-peer daily, across harnesses, without worrying about
+hidden bugs that only surface once it's actually relied on.
 
 ## Current milestone
 
-**M1: Pakai agent-peer tanpa was-was ada bug tersembunyi.**
+**M1: Use agent-peer without worrying about hidden bugs.**
 
-Bereskan temuan prioritas tinggi dari 4 dokumen review (`.dev/reviews/*.md`) yang
-ditulis 17 Sep 2026 oleh agy, pi, opencode, dan Claude — terutama yang dikonfirmasi
-independen oleh 2+ reviewer, dan yang menyangkut keamanan/kebenaran data (bukan cuma
-kenyamanan dokumentasi).
+Close out the highest-priority findings from the 4 review documents
+(`.dev/reviews/*.md`) written 17 Sep 2026 by agy, pi, opencode, and Claude —
+especially the ones independently confirmed by 2+ reviewers, and the ones about
+security/data correctness (not just documentation convenience).
 
-**Gate:** Owner menjalankan `agent-peer list` dan `agent-peer wait` sekali lagi
-setelah semua task M1 ditutup, dan hasilnya gak ada yang aneh.
+**Gate:** Owner runs `agent-peer list` and `agent-peer wait` once more after every
+M1 task is closed, and nothing looks off.
 
 ## Who owns what
 
@@ -33,29 +33,34 @@ request to the owner rather than an edit.
 | `~/.gemini/antigravity/skills/agent-peer/SKILL.md`, `~/.gemini/GEMINI.md` (bagian agent-peer) | `antigravity-test` |
 | `~/.pi/agent/skills/agent-peer/SKILL.md`, `~/.pi/agent/AGENTS.md` (bagian agent-peer) | `pi-98661` |
 | `~/.config/opencode/skills/agent-peer/SKILL.md`, `~/.config/opencode/AGENTS.md` (bagian agent-peer) | `opencode-15297` |
-| `.dev/reviews/<nama>-review.md` | sesi yang namanya sama, masing-masing punya sendiri |
+| `.dev/reviews/<name>-review.md` | the session with the matching name, each owns their own |
 | `docs/`, `README.md`, `.dev/CHARTER.md`, `pyproject.toml` | owner only (rg) |
 
-**Not owned by anyone working here:** git operations (commit/push/branch) — owner only,
-sesuai instruksi global rg. Menghapus/mematikan proses agent lain — owner only.
+**Not owned by anyone working here:** git operations (commit/push/branch) — owner
+only, per rg's global instructions. Killing/terminating other agents' processes —
+owner only.
 
 ## Decisions that are already made
 
-- **Test policy:** semua verifikasi sesi 17 Sep 2026 dilakukan manual live (ad-hoc
-  script + tes lintas-harness nyata), belum ada automated test suite di repo — itu
-  sendiri salah satu temuan M1 (lihat review), tapi belum ada aturan test-wajib buat
-  task lain sampai suite dasarnya ada.
-- **Jangan auto-spawn proses baru sebagai side-effect command lain.** Dicoba sekali
-  (`wait` auto-start `listen`), dibatalkan owner — risiko listener menumpuk diam-diam.
-  Kalau butuh proses baru, harus eksplisit dari user/agent, bukan otomatis.
-- **`wait` tidak refuse total kalau gak reachable** — cuma warning (stderr), tetap
-  lanjut proses (baca backlog tetap valid use-case walau gak ada listener hidup).
-- **Auto session-name (`detect_harness_identity`) sengaja gak nebak env var per-tool**
-  — dipilih walk-parent-process-chain karena lebih reliable & gak butuh kerjasama tiap
-  harness. Tau keterbatasannya (subagent share-parent collision) — itu task M1.
-- **`--timeout` bukan default yang dipaksakan** — sempat direkomendasikan lalu ditolak
-  owner untuk mandatory-standby pattern (background task); biarkan per-context, jangan
-  hardcode rekomendasi timeout tertentu di skill manapun.
-- Editable install (`uv tool install --editable .`) — perubahan source otomatis aktif
-  ke binary terinstall tanpa reinstall manual. Proses yang sudah jalan sebelum edit
-  tetap pakai kode lama sampai di-restart.
+- **Test policy:** all verification during the 17 Sep 2026 session was done live and
+  manually (ad-hoc scripts + real cross-harness tests), there's no automated test
+  suite in the repo yet — that's itself one of the M1 findings (see reviews), but
+  there's no mandatory-test rule for other tasks until the base suite exists.
+- **Don't auto-spawn a new process as a side effect of another command.** Tried once
+  (`wait` auto-starting `listen`), the owner rejected it — risk of listeners silently
+  piling up. If a new process is needed, it must be explicit from the user/agent, not
+  automatic.
+- **`wait` doesn't hard-refuse when unreachable** — just a warning (stderr), still
+  proceeds (reading an already-piled-up backlog is a valid use case even without a
+  live listener).
+- **Auto session-name (`detect_harness_identity`) deliberately doesn't guess a
+  per-tool env var** — walking the parent-process chain was chosen because it's more
+  reliable and needs no cooperation from each harness. Its limitation (subagents
+  sharing a parent collide) is known — that's an M1 task.
+- **`--timeout` is not a default that gets forced onto anyone** — briefly
+  recommended then rejected by the owner for the mandatory-standby pattern
+  (background task); leave it per-context, don't hardcode a specific timeout
+  recommendation into any skill.
+- Editable install (`uv tool install --editable .`) — source changes are
+  automatically live on the installed binary with no manual reinstall. A process
+  already running before an edit keeps using the old code until it's restarted.

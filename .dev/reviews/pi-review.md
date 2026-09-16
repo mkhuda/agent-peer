@@ -1,106 +1,106 @@
-# Review & Audit `agent-peer` + `SKILL.md` dari Perspektif Harness pi
+# Review & Audit of `agent-peer` + `SKILL.md` from the pi Harness Perspective
 
-**Penulis:** pi agent (sesi `pi-98661`)
-**Tanggal:** 17 September 2026
-**Konteks Sesi:** Audit bash tool pi (timeout = SIGKILL process tree), koreksi framing SKILL.md "background task", relay test 3-harness (agy → pi → opencode → agy), dan bedah source (`protocol.py`, `inbox.py`, `listener.py`, `registry.py`, `sender.py`, `cli.py`) plus baca ulang `docs/` & `.dev/HANDOFF.md`.
+**Author:** pi agent (session `pi-98661`)
+**Date:** 17 September 2026
+**Session Context:** Audit of pi's bash tool timeout (= SIGKILL of the process tree), correction of the "background task" framing in SKILL.md, 3-harness relay test (agy → pi → opencode → agy), and source review of `protocol.py`, `inbox.py`, `listener.py`, `registry.py`, `sender.py`, `cli.py` plus a re-read of `docs/` and `.dev/HANDOFF.md`.
 
 ---
 
 ## 1. Executive Summary
 
-`agent-peer` terbukti andal untuk kolaborasi multi-harness dari sisi pi: auto-wakeup via `wait` (tanpa timeout) bekerja end-to-end, relay 3-harness selesai tanpa polling, dan auto-name (`pi-98661`) stabil. Temuan-temuan HANDOFF sebelumnya (cursor/backlog, lock anti-race, auth-fix, ENGINE/cwd hardcode) sudah terverifikasi benar di source saat ini.
+From the pi side, `agent-peer` proved reliable for multi-harness collaboration: auto-wakeup via `wait` (without timeout) works end-to-end, the 3-harness relay completed without polling, and auto-naming (`pi-98661`) is stable. The earlier HANDOFF findings (cursor/backlog, anti-race lock, auth fix, ENGINE/cwd hardcode) are all verifiable in the current source.
 
-Tapi dari sudut pandang harness pi, ada beberapa hal yang **belum tercakup** di review agy / opencode-report / HANDOFF:
+However, from the pi harness point of view there are several things **not yet covered** by the agy review / opencode-report / HANDOFF:
 
-- **BUG UX terverifikasi:** status `new-msg` di session json tidak pernah di-reset ke `idle` setelah pesan dibaca → `agent-peer list` selamanya menampilkan `new-msg` untuk sesi yang pernah menerima pesan, menyesatkan deteksi "siapa yang belum baca pesan".
-- **Ambiguitas semantik "Delivered":** `agent-peer send` mencetak "✅ Delivered" saat pesan sampai ke *listener socket*, BUKAN saat agent membacanya. Tidak ada delivery-receipt/ack-read. Dalam sesi ini foreman berulang kali menyimpulkan "pesan sampai dibaca" dari "Delivered" — asumsi yang salah dan berpotensi mengganggu koordinasi.
-- **Label sender `uds:` = PID, bukan nama sesi:** pesan dari sesi agy yang listen muncul sebagai `From: uds:/tmp/cc-socks/52285.sock` (label `52285`), bukan `antigravity-test`. Kurang informatif untuk debugging/notifikasi.
-- **Tidak ada test suite sama sekali di repo** — semua validasi live-manual. Pola ini sudah membuktikan rapuhnya: beberapa bug (ENGINE hardcode, cwd hardcode, auth-bypass) lolos sampai ditemukan di sesi live.
-
----
-
-## 2. Temuan Terverifikasi (Empiris + Source)
-
-### 2.1 Status `new-msg` Tidak Pernah Di-reset ke `idle` — BUG UX
-- **Lokasi:** `listener.py:244` (set `new-msg` saat pesan masuk) vs `inbox.py` (`wait_for_message` tidak menyentuh session json sama sekali).
-- **Bukti empiris:** `agent-peer list` menampilkan `pi-98661 ... new-msg`, `antigravity-test ... new-msg`, `opencode-15297 ... new-msg` — padahal SEMUA pesan sudah dibaca via `wait` berkali-kali. `grep "idle\|new-msg"` di codebase mengonfirmasi: `idle` hanya ditulis sekali di `setup()` (`listener.py:121`); tidak ada kode yang menulis `idle` setelah itu.
-- **Dampak:** kolom STATUS di `agent-peer list` — yang tampaknya mengindikasikan "ada pesan belum dibaca" — jadi permanen `new-msg` setelah pesan pertama. Siapa pun yang memakai kolom ini untuk memutuskan "apakah saya perlu baca inbox" akan terkecoh.
-- **Rekomendasi:** reset `status: "idle"` (+ `statusUpdatedAt`) saat cursor maju di `wait_for_message` / `clear_inbox`, atau saat `wait` return. Paling rapi: `wait_for_message` sudah tahu session mana yang maju cursornya — sekaligus update session json di `~/.claude/sessions/<pid>.json`.
-
-### 2.2 "Delivered" ≠ "Dibaca" — Ambiguitas Semantik yang Bahaya untuk Koordinasi
-- **Lokasi:** `sender.py:send_message` return `elapsed_ms` setelah socket send; `cli.py:cmd_send` mencetak `✅ Delivered in <ms>ms to <target>`.
-- **Fakta:** delivery = frame sukses ditulis ke socket listener + masuk inbox. Tidak ada mekanisme ack "sudah dibaca agent" (agent baca via `wait` yang menarik cursor).
-- **Bukti empiris sesi ini:** foreman (claude-test) bilang "Dua-duanya sampai, makasih" berdasarkan pesan send saya "✅ Delivered" — padahal yang terverifikasi hanya sampai listener, bukan dibaca. Dalam alur relay multi-hop (agy → pi → opencode → agy) kalau satu hop macet sebelum `wait`, "Delivered" di hop sebelumnya memberi kesan palsu bahwa pesan sudah diproses.
-- **Rekomendasi (minimal):** ubah teks jadi `✅ Delivered to listener` + tambahkan baris penjelas (misal "this means received by <name>'s listener, not yet read"). Opsi lebih kuat: tambahkan status `read` per-message (agent yang `wait`-kan pesan menandai `read: true`), dan `agent-peer status`/`list` menampilkan "unread" vs "read" per sesi. Ini turn-key untuk deteksi "sesi mana yang belum memproses instruksi".
-
-### 2.3 Label Sender `uds:` = PID Bukan Nama Sesi
-- **Lokasi:** `protocol.py:format_user_frame` → `origin_from = f"uds:{from_sock}"`; `listener.py:sender_label` parsing `uds:` → `os.path.basename(...).replace(".sock","")` = **PID murni**.
-- **Bukti empiris:** pesan dari `antigravity-test` (yang listen, jadi punya socket) tercatat `From: uds:/tmp/cc-socks/52285.sock`; sementara pesan dari `claude-test` (tidak listen, tidak punya socket) tampil `From: claude-test`. Jadi label berisi PID untuk sesi yang terdaftar, dan nama hanya untuk sesi yang tidak terdaftar — **terbalik dari yang paling informatif**.
-- **Dampak:** notifikasi macOS, judul di `agent-peer list`, dan log tampil sebagai angka PID; menyulitkan debug siapa pengirim sebenarnya.
-- **Rekomendasi:** di `handle_client`/`process_incoming_frame`, resolve `uds:*` ke nama sesi via `resolve_session(pid)` (registry) bila ada; fallback ke PID bila tidak ditemukan.
+- **Verified UX bug:** the `new-msg` status in the session json is never reset back to `idle` after a message is read → `agent-peer list` forever shows `new-msg` for any session that has ever received a message, misleading the "who hasn't read their messages" detection.
+- **"Delivered" semantic ambiguity:** `agent-peer send` prints "✅ Delivered" when a message reaches the *listener socket*, NOT when the agent has read it. There is no delivery receipt / read-ack. In this session the foreman repeatedly concluded "the message has been read" from "Delivered" — a wrong assumption that can disrupt coordination.
+- **`uds:` sender label = PID, not session name:** messages from a registered agy session arrive as `From: uds:/tmp/cc-socks/52285.sock` (label `52285`), not `antigravity-test`. Less useful for debugging/notifications.
+- **There is no test suite at all in the repo** — every validation is live-manual. This pattern already proved fragile: several bugs (ENGINE hardcode, cwd hardcode, auth-bypass) slipped through until found in live sessions.
 
 ---
 
-## 3. Temuan Source-Only (Belum Terverifikasi Live, tapi Terbaca di Kode)
+## 2. Verified Findings (Empirical + Source)
 
-### 3.1 `peerFeatures` Mengiklankan `notify_idle` yang Tidak Diimplementasikan + `version` Hardcoded
-- `listener.py:105-111`: `"peerFeatures": ["notify_idle", "reply_across_default_dirs", "artifact_yield"]`; `version: "2.1.270"` hardcoded (`listener.py:112`).
-- HANDOFF sendiri mencatat `notify_idle` "field kosmetik, tidak ada implementasi". Mengklaim fitur yang tidak ada ke konsumen protocol (Claude Code asli membaca `peerFeatures`) berisiko: agent peer bisa mengira sesi punya kemampuan `notify_idle`/`artifact_yield` lalu bergantung padanya.
-- **Rekomendasi:** buang `notify_idle` (atau implementasi), jadikan `version` dinamis dari package (`__version__`), atau minimal komentari kalau hardcode ini sengaja untuk kompatibilitas.
+### 2.1 `new-msg` Status Is Never Reset to `idle` — UX Bug
+- **Location:** `listener.py:244` (sets `new-msg` when a message arrives) vs `inbox.py` (`wait_for_message` never touches the session json at all).
+- **Empirical evidence:** `agent-peer list` shows `pi-98661 ... new-msg`, `antigravity-test ... new-msg`, `opencode-15297 ... new-msg` even though ALL messages were already read via `wait` many times. A `grep "idle\|new-msg"` across the codebase confirms: `idle` is only written once in `setup()` (`listener.py:121`); no code writes `idle` afterwards.
+- **Impact:** the STATUS column of `agent-peer list` — which reads as "has unread messages" — becomes permanently `new-msg` after the first message. Anyone using this column to decide "should I read my inbox" gets misled.
+- **Recommendation:** reset `status: "idle"` (+ `statusUpdatedAt`) when the cursor advances in `wait_for_message` / `clear_inbox`, or when `wait` returns. Cleanest: `wait_for_message` already knows which session's cursor advanced — update the session json in `~/.claude/sessions/<pid>.json` at the same time.
 
-### 3.2 `detect_harness_identity` Tidak Skip `sshd`/`tmux`/`screen`
-- `_GENERIC_PROC_NAMES` (`protocol.py`) memuat `zsh/bash/sh/dash/tcsh/csh/ksh/fish/login/env/sudo/su/node/uv/uvx/python/python3` — tapi TIDAK memuat `sshd`, `tmux`, `screen`, `sshd`-anak, container runtime.
-- Skenario nyata untuk pi: pi dijalankan dari laptop via SSH (chain `pi ← bash ← sshd`) atau di dalam tmux session (`pi ← zsh ← tmux`). Auto-name akan jadi `sshd-<pid>` / `tmux-<pid>` — nama identitas yang salah & tidak stabil untuk kolaborasi.
-- **Rekomendasi:** tambahkan `sshd`, `tmux`, `screen`, `ssh`, `mosh-server`, `containerd-shim`, dst ke daftar skip; tambahkan unit test untuk chain ini supaya tidak regresi.
+### 2.2 "Delivered" ≠ "Read" — a Semantics Ambiguity that's Dangerous for Coordination
+- **Location:** `sender.py:send_message` returns `elapsed_ms` after a socket send; `cli.py:cmd_send` prints `✅ Delivered in <ms>ms to <target>`.
+- **Fact:** delivery means the frame was successfully written to the target listener socket and landed in its inbox. There is no ack that "the agent read it" (an agent reads via `wait`, which advances its cursor).
+- **Empirical evidence from this session:** the foreman (claude-test) said "Both arrived, thanks" based on my "✅ Delivered" send output — but that only verified arrival at the listener, not that it was read. In a multi-hop relay (agy → pi → opencode → agy), if one hop stalls before `wait`, "Delivered" on the previous hop creates a false impression that the message was processed.
+- **Recommendation (minimal):** change the text to `✅ Delivered to listener` and add a clarifying line (e.g. "this means received by <name>'s listener, not yet read"). Stronger option: add a per-message `read` status (the agent that `wait`s the message marks it `read: true`), and have `agent-peer status`/`list` show "unread" vs "read" per session. This is the turnkey way to detect "which session hasn't processed its instruction".
 
-### 3.3 `client.settimeout(5.0)` Bisa Memutus Frame Besar yang Terfragmentasi
-- `listener.py:handle_client`: satu timeout 5s untuk seluruh koneksi. Pesan JSON besar (> socket buffer) yang terkirim dengan jeda antar-pecahan > 5s akan di-treat sebagai timeout → koneksi ditutup → pesan drop.
-- Untuk frame kecil (pesan tipikal) tidak masalah. Tapi `agent-peer` sendiri menyarankan "jangan kirim diff besar" — tidak ada enforcement ukuran frame; siapa pun yang kirim payload MB-scale berisiko.
-- **Rekomendasi:** timeout per-`recv` (reset timer tiap data datang) + dokumentasi limit ukuran frame; atau batasi ukuran frame di sisi penerima (drop + log bila > N MB).
-
-### 3.4 Partial-Match `resolve_session` Bisa Mengirim ke Sesi yang Tidak Dimaksud
-- `registry.py`: ketika exact match tidak ada, fallback `target_lower in name`. `agent-peer send pi 1.0.0 "..."` akan cocok ke `pi-98661` — tepat bila hanya satu cocok, tanpa konfirmasi. Risiko rendah tapi nyata di ekosistem dengan banyak sesi `pi-*`/`claude-*`.
-- Ambiguity sudah di-guard (error kalau >1 cocok). Batas yang tersisa: **exactly-satu-tapi-salah**. Rekomendasi: kalau ada exact match, prioritas exact; kalau partial dan jumlah sesi > 5, tampilkan "kurir match" konfirmasi/echo di output.
-
-### 3.5 Lock File Tidak Pernah Di-unlink (Sampah Menumpuk)
-- `cmd_wait` (`cli.py`) membuat `~/.agent-peer/locks/<session>.lock` dan melepas `flock` saat selesai — tetapi file-nya tidak di-`unlink`. Aman secara fungsional (flock di-release OS saat proses mati), tapi direktori `locks/` menumpuk file permanen per sesi. Minor; rekomendasi: `os.unlink(lock_path)` di `finally`.
-
-### 3.6 `_read_cursor` Fallback ke `time.time()` Saat Cursor Corrupt — Backlog Bisa "Hilang"
-- `inbox.py:_read_cursor`: kalau file cursor tidak bisa di-parse, fallback `return time.time()` → cursor melompat ke "sekarang"; SEMUA pesan yang belum dibaca sebelum korupsi terlewat permanen (keanggap lama).
-- Lebih aman: fallback `0` (anggap belum ada yang dibaca — jangan sampai melewatkan pesan) dan warning ke stderr. Konsisten dengan semangat "never lose a message" yang sudah diterapkan di backlog-merge.
+### 2.3 `uds:` Sender Label = PID, Not Session Name
+- **Location:** `protocol.py:format_user_frame` → `origin_from = f"uds:{from_sock}"`; `listener.py:sender_label` parses `uds:` → `os.path.basename(...).replace(".sock","")` = a **bare PID**.
+- **Empirical evidence:** a message from `antigravity-test` (which listens, so it has a socket) was recorded as `From: uds:/tmp/cc-socks/52285.sock`; meanwhile a message from `claude-test` (which does NOT listen, so no socket) shows `From: claude-test`. So registered sessions show a PID and unregistered ones show a name — **inverted from what's most informative**.
+- **Impact:** macOS notifications, titles in `agent-peer list`, and logs show a bare number; debugging who actually sent becomes harder.
+- **Recommendation:** in `handle_client`/`process_incoming_frame`, resolve `uds:*` to the session name via `resolve_session(pid)` (registry) when present; fall back to the PID when not found.
 
 ---
 
-## 4. Penilaian SKILL.md pi (Versi Saat Ini yang Sudah Dikoreksi)
+## 3. Source-Only Findings (Not Yet Verified Live, but Readable in the Code)
 
-Yang sudah bagus (hasil koreksi sesi ini, terverifikasi benar vs source):
-- `listen` = detach di level shell dengan `&`, karena proses-nya tidak pernah exit sendiri (kalau dipanggil sinkron = freeze turn selamanya) ✓
-- `wait` = tool call sinkron TERAKHIR di turn, tanpa `--timeout` agent-peer MAUPUN `timeout` bash tool (dua hal beda yang sempat ketuker) ✓
-- Penjelasan bash tool pi: sinkron, `timeout` = SIGKILL process tree, tidak ada auto-relaunch ✓
+### 3.1 `peerFeatures` Advertises `notify_idle` Which Is Not Implemented + Hardcoded `version`
+- `listener.py:105-111`: `"peerFeatures": ["notify_idle", "reply_across_default_dirs", "artifact_yield"]`; `version` is hardcoded to `"2.1.270"` (`listener.py:112`).
+- HANDOFF itself notes `notify_idle` is "a cosmetic field, not implemented". Claiming non-existent features to protocol consumers (real Claude Code reads `peerFeatures`) is risky: a peer agent could assume this session supports `notify_idle`/`artifact_yield` and rely on it.
+- **Recommendation:** drop `notify_idle` (or implement it), make `version` dynamic from the package (`__version__`), or at minimum comment why it's hardcoded if it's intentional for compatibility.
 
-Celah yang masih tersisa di SKILL.md pi:
+### 3.2 `detect_harness_identity` Does Not Skip `sshd`/`tmux`/`screen`
+- `_GENERIC_PROC_NAMES` (`protocol.py`) contains `zsh/bash/sh/dash/tcsh/csh/ksh/fish/login/env/sudo/su/node/uv/uvx/python/python3` — but NOT `sshd`, `tmux`, `screen`, sshd children, or container runtimes.
+- A realistic pi scenario: pi running from a laptop over SSH (chain `pi ← bash ← sshd`) or inside a tmux session (`pi ← zsh ← tmux`). The auto-name would become `sshd-<pid>` / `tmux-<pid>` — a wrong and unstable identity for collaboration.
+- **Recommendation:** add `sshd`, `tmux`, `screen`, `ssh`, `mosh-server`, `containerd-shim`, etc. to the skip list; add a unit test for these chains so it doesn't regress.
 
-1. **`agent-peer listen > log 2>&1 &` tanpa `nohup`/`disown` belum terverifikasi bertahan di semua harness.** Di sesi ini yang TERBUKTI bertahan adalah `nohup agent-peer listen > /tmp/ap-listen.log 2>&1 & disown`. Di bash tool pi, proses anak detached (`detached: true`) dan listener saya (PID 512) masih hidup — tapi itu dengan `nohup` tambahan. **Rekomendasi:** tambahkan `nohup` + `disown` di contoh SKILL.md (aman untuk pi/opencode/bash apa pun, tidak merugikan kalau harness lain punya background-task), dan tulis satu kalimat "verify listener survives the tool call (`agent-peer list` shows you before you rely on it)".
-2. **Tidak ada satu kalimat pun soal makna "Delivered"** (lihat 2.2) — tambahkan: "Receiving the delivery confirmation does NOT mean the peer has read your message; it means their listener wrote it to their inbox."
-3. **Tidak ada guidance subagent/parallel-task** (ditemukan agy juga): kalau sesi menjalankan subagent/parallel task yang butuh komunikasi independen, wajib `--name <unik>` — kalau tidak, semua subagent mewarisi nama induk (`pi-<pid>`) dan saling tabrak di lock `wait` serta inbox campur. SKILL.md pi boleh menambahkan satu baris ini (agy sudah merekomendasikan hal sama untuk harness-nya).
-4. **Belum ada langkah verifikasi eksplisit setelah `listen`:** "konfirmasi di `agent-peer list` bahwa namamu muncul (ENGINE benar, STATUS idle)" — persis langkah yang menangkap bug ENGINE/cwd di sesi ini. Satu baris ini murah dan menyelamatkan sesi-sesi berikutnya.
+### 3.3 `client.settimeout(5.0)` Can Drop Large Fragmented Frames
+- `listener.py:handle_client`: one 5s timeout for the whole connection. A large JSON message (> socket buffer) sent with > 5s gaps between fragments will hit the timeout → connection closed → message dropped.
+- Fine for typical small frames, but `agent-peer` itself advises "don't send large diffs" — there's no frame-size enforcement; anyone sending an MB-scale payload is at risk.
+- **Recommendation:** a per-`recv` timeout (reset the timer on every chunk) + document a frame-size limit; or cap frame size at the receiver (drop + log when > N MB).
+
+### 3.4 `resolve_session` Partial-Match Can Send to a Different Session Than Intended
+- `registry.py`: when there's no exact match it falls back to `target_lower in name`. `agent-peer send pi ...` will match `pi-98661` — which is fine when it's the only match, but it happens without confirmation. Low risk, but real in an ecosystem with many `pi-*`/`claude-*` sessions.
+- Ambiguity is already guarded (errors when > 1 match). The remaining edge is **exactly-one-but-wrong**. Recommendation: prefer exact match when present; if matching is partial and there are > 5 sessions, echo the resolved name in the output for confirmation.
+
+### 3.5 Lock Files Are Never Unlinked (Junk Accumulates)
+- `cmd_wait` (`cli.py`) creates `~/.agent-peer/locks/<session>.lock` and releases the `flock` when done — but never `os.unlink`s the file. Functionally safe (flock is released by the OS when a process dies) but the `locks/` directory accumulates a permanent file per session. Minor; recommendation: `os.unlink(lock_path)` in the `finally` block.
+
+### 3.6 `_read_cursor` Falls Back to `time.time()` on Corrupt Cursor — Backlog Can Be "Lost"
+- `inbox.py:_read_cursor`: if the cursor file can't be parsed, it falls back to `return time.time()` → the cursor jumps to "now"; ALL unread messages before the corruption are permanently skipped (treated as old).
+- Safer: fall back to `0` (assume nothing was read — never skip messages) with a stderr warning. This is consistent with the "never lose a message" spirit already applied to backlog-merge.
 
 ---
 
-## 5. Prioritas Perbaikan yang Disarankan (untuk Foreman)
+## 4. Assessment of the pi SKILL.md (Current Corrected Version)
 
-| # | Temuan | Tingkat | Perbaikan |
+What is already good (result of this session's corrections, verified against source):
+- `listen` = detach at the shell level with `&`, because the process never exits on its own (called synchronously it would freeze the turn forever) ✓
+- `wait` = the synchronous LAST tool call of the turn, without agent-peer's `--timeout` NOR the bash tool's `timeout` (two different things that were initially conflated) ✓
+- pi bash tool explanation: synchronous, `timeout` = SIGKILL of the process tree, no auto-relaunch ✓
+
+Gaps still remaining in the pi SKILL.md:
+
+1. **`agent-peer listen > log 2>&1 &` without `nohup`/`disown` is not verified to survive in every harness.** What PROVED to survive in this session was `nohup agent-peer listen > /tmp/ap-listen.log 2>&1 & disown`. In pi's bash tool the child is detached (`detached: true`) and my listener (PID 512) is still alive — but that was with the extra `nohup`. **Recommendation:** add `nohup` + `disown` to the SKILL.md example (safe for pi/opencode/any bash, harmless if another harness has real background tasks) plus a verification line: "confirm the listener survives the tool call (`agent-peer list` shows you) before relying on it".
+2. **No sentence about the meaning of "Delivered"** (see 2.2) — add: "Receiving the delivery confirmation does NOT mean the peer has read your message; it means their listener wrote it to their inbox."
+3. **No guidance for subagents/parallel tasks** (also found by agy): if a session runs subagents/parallel tasks that need independent communication, they MUST use `--name <unique>` — otherwise all subagents inherit the parent name (`pi-<pid>`) and collide on the `wait` lock plus the inbox mixes. The pi SKILL.md could add this single line (agy already recommends the same for its harness).
+4. **No explicit verification step after `listen`:** "confirm in `agent-peer list` that your name appears (correct ENGINE, STATUS idle)" — precisely the step that caught the ENGINE/cwd bugs this session. One cheap line that saves future sessions.
+
+---
+
+## 5. Suggested Fix Priority (for the Foreman)
+
+| # | Finding | Severity | Fix |
 |---|---|---|---|
-| 1 | Status `new-msg` macet (2.1) | **High (UX)** | Reset status saat cursor maju / `wait` return |
-| 2 | "Delivered" ≠ "dibaca" (2.2) | **High (semantik koordinasi)** | Ubah teks + opsional status read/unread |
-| 3 | Tidak ada test suite (exec summary) | **High (engineering)** | Unit test untuk protocol/inbox/cursor/registry + smoke integration |
-| 4 | Label sender UDS = PID (2.3) | Medium | Resolve PID → nama via registry |
-| 5 | `peerFeatures`/`version` menyesatkan (3.1) | Medium | Buang klaim fitur tidak ada |
-| 6 | `sshd`/`tmux` tidak di-skip (3.2) | Medium | Perluas `_GENERIC_PROC_NAMES` + test |
-| 7 | SKILL.md: `nohup`/`disown`, makna Delivered, subagent `--name`, verifikasi post-listen (4) | Medium | Patch SKILL.md pi |
+| 1 | Stuck `new-msg` status (2.1) | **High (UX)** | Reset status when cursor advances / `wait` returns |
+| 2 | "Delivered" ≠ "read" (2.2) | **High (coordination semantics)** | Change the text + optionally add read/unread status |
+| 3 | No test suite (exec summary) | **High (engineering)** | Unit tests for protocol/inbox/cursor/registry + an integration smoke test |
+| 4 | UDS sender label = PID (2.3) | Medium | Resolve PID → name via registry |
+| 5 | Misleading `peerFeatures`/`version` (3.1) | Medium | Drop claims for features that don't exist |
+| 6 | `sshd`/`tmux` not skipped (3.2) | Medium | Expand `_GENERIC_PROC_NAMES` + tests |
+| 7 | SKILL.md: `nohup`/`disown`, Delivered meaning, subagent `--name`, post-listen verification (4) | Medium | Patch the pi SKILL.md |
 
 ---
 
-## 6. Kesimpulan
+## 6. Conclusion
 
-`agent-peer` secara fungsional sudah "proven" untuk pi (auto-wakeup, backlog, lock, relay 3-harness semuanya bekerja di sesi nyata). Issue paling mendesak bukan di alur inti messaging, melainkan di **semantik status yang menyesatkan** (`new-msg` macet, "Delivered" disalahartikan sebagai "dibaca") dan **tidak adanya test suite** yang membuat regresi (ENGINE/cwd/auth hardcode) baru ketahuan di sesi live. Keduanya layak dibereskan sebelum agent-peer dipakai sebagai penggerak koordinasi yang lebih serius (misal handoff task dengan banyak sesi paralel).
+`agent-peer` is functionally "proven" for pi (auto-wakeup, backlog, lock, 3-harness relay all work in real sessions). The most urgent issues are not in the core messaging flow but in **misleading status semantics** (`new-msg` stuck, "Delivered" misinterpreted as "read") and the **absence of a test suite**, which has let regressions (ENGINE/cwd/auth hardcodes) go unnoticed until live sessions. Both deserve to be fixed before agent-peer is used as the engine for more serious coordination (e.g. task handoffs with many parallel sessions).
