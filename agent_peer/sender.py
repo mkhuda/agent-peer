@@ -1,9 +1,57 @@
+import shutil
 import socket
+import subprocess
 import time
 from typing import Dict, Any, Optional
 
 from .registry import resolve_session
 from .protocol import format_auth_frame, format_user_frame
+from .inbox import append_inbox
+
+def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name: str, priority: str) -> Dict[str, Any]:
+    """Deliver natively via 'codex queue', bypassing the file-based inbox entirely."""
+    if not shutil.which("codex"):
+        raise RuntimeError("Target is a Codex session with a registered thread, but the 'codex' binary is not on PATH.")
+
+    t0 = time.time()
+    result = subprocess.run(
+        ["codex", "queue", "--thread", thread_id, "--message", f"[from {from_name}] {content}"],
+        capture_output=True, text=True, timeout=10
+    )
+    if result.returncode != 0:
+        raise RuntimeError(f"'codex queue' failed: {(result.stderr or result.stdout).strip()}")
+    elapsed_ms = (time.time() - t0) * 1000
+
+    to_name = session.get("name")
+    to_pid = session["pid"]
+    # No receiving listener processes this delivery (codex queue bypasses the
+    # socket entirely), so log it here or 'watch'/'logs'/'inbox' never see it.
+    append_inbox(
+        {
+            "from": from_name,
+            "to": to_name,
+            "to_pid": to_pid,
+            "recipient_name": to_name,
+            "recipient_pid": to_pid,
+            "priority": priority,
+            "type": "user",
+            "content": content,
+            "raw": {"transport": "codex-queue", "thread_id": thread_id}
+        },
+        session_name=to_name,
+        session_pid=to_pid
+    )
+
+    return {
+        "success": True,
+        "target_pid": session["pid"],
+        "target_name": session.get("name"),
+        "target_socket": f"codex-queue:{thread_id}",
+        "elapsed_ms": round(elapsed_ms, 2),
+        "priority": priority,
+        "from": from_name,
+        "message": content
+    }
 
 def send_message(
     target: str,
@@ -17,6 +65,10 @@ def send_message(
     Send real-time peer message to target session.
     """
     session, sock_path, peer_token = resolve_session(target)
+
+    codex_thread_id = session.get("codexThreadId")
+    if session.get("agentType") == "CODEX" and codex_thread_id:
+        return _send_via_codex_queue(session, codex_thread_id, content, from_name, priority)
 
     # Auto-detect sender socket if sender is registered in sessions
     if from_sock is None:
@@ -48,8 +100,29 @@ def send_message(
         time.sleep(0.12) # brief pause to let target process before close
     finally:
         client.close()
-    
+
     elapsed_ms = (time.time() - t0) * 1000
+
+    if not session.get("managedByAgentPeer"):
+        # Real native Claude Code session - its own binary receives this over
+        # the socket, never our listener.py, so nothing else will log it.
+        to_name = session.get("name")
+        to_pid = session["pid"]
+        append_inbox(
+            {
+                "from": f"uds:{from_sock}" if from_sock else from_name,
+                "to": to_name,
+                "to_pid": to_pid,
+                "recipient_name": to_name,
+                "recipient_pid": to_pid,
+                "priority": priority,
+                "type": "user",
+                "content": content,
+                "raw": {"transport": "uds-native-claude"}
+            },
+            session_name=to_name,
+            session_pid=to_pid
+        )
 
     return {
         "success": True,

@@ -64,7 +64,12 @@ def cmd_listen(args):
     # Engine is detected independently of the session name, even if --name
     # was given manually, so it always reflects the real calling harness.
     harness, _ = detect_harness_identity()
-    listener = PeerListener(name=name, agent_type=(harness.upper() if harness else None))
+    codex_thread_id = args.codex_thread or os.environ.get("CODEX_THREAD_ID")
+    listener = PeerListener(
+        name=name,
+        agent_type=(harness.upper() if harness else None),
+        codex_thread_id=codex_thread_id
+    )
     listener.run()
 
 def cmd_inbox(args):
@@ -219,6 +224,7 @@ def main():
     # listen
     p_listen = subparsers.add_parser("listen", help="Start UDS listener to receive messages from peers")
     p_listen.add_argument("--name", default=None, help="Session name to register in Claude registry (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
+    p_listen.add_argument("--codex-thread", default=None, help="This Codex session's own thread UUID (default: $CODEX_THREAD_ID). When set, 'agent-peer send' to this session delivers via native 'codex queue' instead of the file-based inbox.")
     p_listen.set_defaults(func=cmd_listen)
 
     # inbox

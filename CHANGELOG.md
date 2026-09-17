@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0
+
+Adds Codex CLI as a fully-supported harness, and gives it (together with
+Claude Code) native inbound delivery instead of the generic file-mailbox
+every other harness uses.
+
+- `agent-peer listen --codex-thread <uuid>` registers a Codex session with
+  its own native thread UUID. Once registered that way, `agent-peer send`
+  delivers to it via `codex queue` directly - no `listen`/`wait` loop needed,
+  confirmed live against a real Codex CLI session.
+- Fixed a logging gap: any delivery that bypasses agent-peer's own socket
+  listener (the new Codex-native path, and - previously unnoticed - every
+  message sent to a real native Claude Code session) never showed up in
+  `agent-peer watch`/`logs`/`inbox`. Both paths now log on the sender's side.
+- Ships `skills/codex/` (Codex CLI) and `skills/claude/` (Claude Code) -
+  the two harnesses with native delivery, so neither one's skill teaches a
+  `wait` loop it doesn't need.
+- README and the architecture diagram no longer frame agent-peer as
+  "unlocking Claude's protocol for everyone else" - it's a mesh that uses
+  each harness's own native transport when one exists (Claude, Codex) and a
+  shared socket + `wait` fallback for the rest (agy, pi, opencode).
+
 ## 0.2.1
 
 - Fixed invalid author email in package metadata (`rg@local`) that made

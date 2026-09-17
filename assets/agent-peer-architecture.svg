@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="620" viewBox="0 0 1100 620" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" width="1100" height="640" viewBox="0 0 1100 640" role="img" aria-labelledby="title desc">
   <title id="title">agent-peer architecture</title>
-  <desc id="desc">agent-peer is a local IPC mesh connecting Claude Code, Antigravity, pi, opencode, and other agent harnesses on the same machine over Unix Domain Sockets, backed by a shared registry and per-session inbox, cursor, and lock files, with a reactive wait-to-wakeup loop.</desc>
+  <desc id="desc">agent-peer is a local IPC mesh connecting Claude Code, Codex CLI, Antigravity, pi, and opencode on the same machine. Claude Code and Codex CLI deliver natively through their own protocols; Antigravity, pi, and opencode share a Unix Domain Socket transport with a reactive wait-to-wakeup loop. Every delivery is logged to a shared registry and state directory regardless of transport.</desc>
 
   <defs>
     <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
@@ -20,54 +20,67 @@
       .tiny { fill: #94a3b8; font: 500 10px JetBrains Mono, IBM Plex Mono, monospace; }
       .arrow-label { fill: #94a3b8; font: 600 10.5px JetBrains Mono, IBM Plex Mono, monospace; }
       .accent-label { fill: #fbbf24; font: 700 11px JetBrains Mono, IBM Plex Mono, monospace; }
+      .accent-sub { fill: #fbbf24; font: 600 9.5px JetBrains Mono, IBM Plex Mono, monospace; }
     </style>
   </defs>
 
-  <rect width="1100" height="620" fill="#020617"/>
-  <rect width="1100" height="620" fill="url(#grid)" opacity="0.9"/>
-  <rect x="24" y="24" width="1052" height="572" rx="18" fill="#0f172a" opacity="0.58" stroke="#1e293b" stroke-width="1.5"/>
+  <rect width="1100" height="640" fill="#020617"/>
+  <rect width="1100" height="640" fill="url(#grid)" opacity="0.9"/>
+  <rect x="24" y="24" width="1052" height="592" rx="18" fill="#0f172a" opacity="0.58" stroke="#1e293b" stroke-width="1.5"/>
 
   <circle cx="54" cy="58" r="6" fill="#34d399"/>
   <text x="74" y="66" class="title">agent-peer</text>
   <text x="74" y="90" class="subtitle">A local IPC mesh: any agent harness on this machine can find, message, and reactively wake up any other.</text>
 
-  <!-- Harness session boxes -->
-  <rect x="80" y="140" width="220" height="72" rx="8" fill="#0f172a"/>
-  <rect x="80" y="140" width="220" height="72" rx="8" fill="#083344" fill-opacity="0.5" stroke="#22d3ee" stroke-width="1.5"/>
-  <text x="190" y="170" class="box-title" text-anchor="middle">Claude Code</text>
-  <text x="190" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
+  <!-- Harness session boxes: native on the outer edges, generic (socket-based) in the middle -->
+  <rect x="70" y="140" width="185" height="72" rx="8" fill="#0f172a"/>
+  <rect x="70" y="140" width="185" height="72" rx="8" fill="#083344" fill-opacity="0.5" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="162.5" y="167" class="box-title" text-anchor="middle">Claude Code</text>
+  <text x="162.5" y="185" class="accent-sub" text-anchor="middle">native · /peer protocol</text>
+  <text x="162.5" y="200" class="box-sub" text-anchor="middle">no wait loop needed</text>
 
-  <rect x="320" y="140" width="220" height="72" rx="8" fill="#0f172a"/>
-  <rect x="320" y="140" width="220" height="72" rx="8" fill="#064e3b" fill-opacity="0.5" stroke="#34d399" stroke-width="1.5"/>
-  <text x="430" y="170" class="box-title" text-anchor="middle">Antigravity (agy)</text>
-  <text x="430" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
+  <rect x="271" y="140" width="185" height="72" rx="8" fill="#0f172a"/>
+  <rect x="271" y="140" width="185" height="72" rx="8" fill="#064e3b" fill-opacity="0.5" stroke="#34d399" stroke-width="1.5"/>
+  <text x="363.5" y="170" class="box-title" text-anchor="middle">Antigravity (agy)</text>
+  <text x="363.5" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
 
-  <rect x="560" y="140" width="220" height="72" rx="8" fill="#0f172a"/>
-  <rect x="560" y="140" width="220" height="72" rx="8" fill="#3b0764" fill-opacity="0.42" stroke="#c084fc" stroke-width="1.5"/>
-  <text x="670" y="170" class="box-title" text-anchor="middle">pi</text>
-  <text x="670" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
+  <rect x="472" y="140" width="185" height="72" rx="8" fill="#0f172a"/>
+  <rect x="472" y="140" width="185" height="72" rx="8" fill="#3b0764" fill-opacity="0.42" stroke="#c084fc" stroke-width="1.5"/>
+  <text x="564.5" y="170" class="box-title" text-anchor="middle">pi</text>
+  <text x="564.5" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
 
-  <rect x="800" y="140" width="220" height="72" rx="8" fill="#0f172a"/>
-  <rect x="800" y="140" width="220" height="72" rx="8" fill="#881337" fill-opacity="0.42" stroke="#fb7185" stroke-width="1.5"/>
-  <text x="910" y="170" class="box-title" text-anchor="middle">opencode</text>
-  <text x="910" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
+  <rect x="673" y="140" width="185" height="72" rx="8" fill="#0f172a"/>
+  <rect x="673" y="140" width="185" height="72" rx="8" fill="#881337" fill-opacity="0.42" stroke="#fb7185" stroke-width="1.5"/>
+  <text x="765.5" y="170" class="box-title" text-anchor="middle">opencode</text>
+  <text x="765.5" y="190" class="box-sub" text-anchor="middle">listen · send · wait</text>
 
-  <!-- Down arrows into the socket layer -->
-  <path d="M 190 212 L 190 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 430 212 L 430 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 670 212 L 670 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 910 212 L 910 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
-  <text x="205" y="255" class="arrow-label">send</text>
+  <rect x="874" y="140" width="185" height="72" rx="8" fill="#0f172a"/>
+  <rect x="874" y="140" width="185" height="72" rx="8" fill="#0c2d5e" fill-opacity="0.55" stroke="#fbbf24" stroke-width="1.6"/>
+  <text x="966.5" y="167" class="box-title" text-anchor="middle">Codex CLI</text>
+  <text x="966.5" y="185" class="accent-sub" text-anchor="middle">native · codex queue</text>
+  <text x="966.5" y="200" class="box-sub" text-anchor="middle">no wait loop needed</text>
 
-  <!-- Socket / transport layer -->
-  <rect x="80" y="292" width="940" height="66" rx="8" fill="#0f172a"/>
-  <rect x="80" y="292" width="940" height="66" rx="8" fill="#1e293b" opacity="0.66" stroke="#94a3b8" stroke-width="1.5"/>
-  <text x="550" y="320" class="box-title" text-anchor="middle">Unix Domain Socket — /tmp/cc-socks/&lt;pid&gt;.sock</text>
-  <text x="550" y="340" class="box-sub" text-anchor="middle">auth token handshake + JSON message frame · delivered in under 200ms</text>
+  <!-- Generic (socket-based) down arrows -->
+  <path d="M 363.5 212 L 363.5 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 564.5 212 L 564.5 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 765.5 212 L 765.5 288" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="378" y="255" class="arrow-label">send</text>
 
-  <!-- Down arrows into persistent state -->
-  <path d="M 400 358 C 380 380, 350 400, 330 418" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
-  <path d="M 700 358 C 720 380, 750 400, 770 418" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <!-- Socket / transport layer (only agy / pi / opencode use this) -->
+  <rect x="290" y="292" width="580" height="66" rx="8" fill="#0f172a"/>
+  <rect x="290" y="292" width="580" height="66" rx="8" fill="#1e293b" opacity="0.66" stroke="#94a3b8" stroke-width="1.5"/>
+  <text x="580" y="320" class="box-title" text-anchor="middle">Unix Domain Socket — /tmp/cc-socks/&lt;pid&gt;.sock</text>
+  <text x="580" y="340" class="box-sub" text-anchor="middle">agent-peer's own listener · auth handshake + JSON frame</text>
+
+  <!-- Native dashed arrows, routed around the socket layer along the outer margins -->
+  <path d="M 162.5 212 C 100 250, 46 270, 46 330 C 46 400, 46 440, 140 458" fill="none" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#accent-arrow)"/>
+  <path d="M 966.5 212 C 1030 250, 1058 270, 1058 330 C 1058 400, 1058 440, 960 458" fill="none" stroke="#fbbf24" stroke-width="2" stroke-dasharray="6 6" marker-end="url(#accent-arrow)"/>
+  <text x="20" y="300" class="accent-label" transform="rotate(-90 20 300)" text-anchor="middle">native</text>
+  <text x="1080" y="300" class="accent-label" transform="rotate(90 1080 300)" text-anchor="middle">native</text>
+
+  <!-- Down arrows from socket layer into persistent state -->
+  <path d="M 420 358 C 400 380, 360 400, 335 418" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M 740 358 C 760 380, 800 400, 825 418" fill="none" stroke="#94a3b8" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Registry box -->
   <rect x="140" y="422" width="380" height="80" rx="8" fill="#0f172a"/>
@@ -83,15 +96,14 @@
   <text x="770" y="472" class="box-sub" text-anchor="middle">inbox.jsonl · cursors/*.json</text>
   <text x="770" y="488" class="box-sub" text-anchor="middle">locks/*.lock (one wait per session)</text>
 
-  <!-- Reactive wakeup loop (the standout mechanic) -->
-  <path d="M 960 460 C 1050 460, 1050 190, 1020 190" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-dasharray="7 7" marker-end="url(#accent-arrow)"/>
+  <!-- Reactive wakeup loop, scoped to the socket-based harnesses only -->
+  <path d="M 780 422 C 800 390, 760 360, 700 358" fill="none" stroke="#fbbf24" stroke-width="2.2" stroke-dasharray="7 7" marker-end="url(#accent-arrow)"/>
+  <rect x="600" y="358" width="88" height="46" rx="7" fill="#1c1305" stroke="#fbbf24" stroke-width="1.3"/>
+  <text x="644" y="377" class="accent-label" text-anchor="middle">wait</text>
+  <text x="644" y="393" class="accent-label" text-anchor="middle">-&gt; wakeup</text>
 
-  <!-- Solid label block so the dashed line never crosses through the text -->
-  <rect x="988" y="298" width="88" height="46" rx="7" fill="#1c1305" stroke="#fbbf24" stroke-width="1.3"/>
-  <text x="1032" y="317" class="accent-label" text-anchor="middle">wait</text>
-  <text x="1032" y="333" class="accent-label" text-anchor="middle">-&gt; wakeup</text>
-
-  <!-- Flow caption -->
-  <text x="74" y="548" class="tiny">flow:  harness A "send" -&gt; socket -&gt; harness B's inbox  |  harness B "wait" blocks, merges any backlog, returns the instant a message lands</text>
-  <text x="74" y="568" class="tiny">no polling anywhere in the loop - each session's own process exit is what wakes its agent loop back up.</text>
+  <!-- Flow captions -->
+  <text x="74" y="548" class="tiny">generic (agy / pi / opencode):  "send" -&gt; socket -&gt; inbox file  |  "wait" blocks, merges any backlog, returns the instant a message lands - no polling.</text>
+  <text x="74" y="566" class="tiny">native (Claude Code / Codex CLI):  each session's own protocol delivers directly - no listen/wait step, and it's still logged here for "agent-peer watch"/"logs".</text>
+  <text x="74" y="588" class="tiny">everything sends the same way regardless of target: agent-peer send &lt;peer&gt; "message" - agent-peer picks the right transport underneath.</text>
 </svg>

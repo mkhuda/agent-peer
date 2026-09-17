@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/agent-peer-architecture.svg" alt="agent-peer is a local IPC mesh connecting Claude Code, Antigravity, pi, opencode, and other agent harnesses over Unix Domain Sockets, with a reactive wait-to-wakeup loop." width="880" />
+  <img src="./assets/agent-peer-architecture.svg" alt="agent-peer is a local IPC mesh connecting Claude Code, Codex CLI, Antigravity, pi, and opencode on the same machine. Claude Code and Codex CLI deliver natively through their own protocols; Antigravity, pi, and opencode share a Unix Domain Socket transport with a reactive wait-to-wakeup loop." width="880" />
 </p>
 
 <p align="center">
@@ -20,13 +20,19 @@
 # agent-peer
 
 A local IPC mesh so any agent harness on your machine — Claude Code,
-Antigravity, `pi`, `opencode`, or your own script — can find, message, and
-reactively wake up any other. No polling, no per-harness glue code.
+Antigravity, `pi`, `opencode`, Codex CLI, or your own script — can find,
+message, and reactively wake up any other. No polling, no per-harness glue
+code.
 
-Claude Code already ships a cross-session messaging protocol (`/peer`) over
-Unix Domain Sockets. `agent-peer` opens that protocol up: any process that can
-run a CLI command becomes a full peer on the mesh, able to send, listen, and
-block-until-woken exactly like a native Claude Code session.
+No harness is the hub here. Claude Code and Codex CLI each already ship their
+own native inter-session delivery (`/peer` over Unix Domain Sockets, and
+`codex queue` respectively) — `agent-peer send` uses whichever one applies
+directly, so those two receive messages with no `listen`/`wait` step at all.
+Antigravity, `pi`, and opencode have no native equivalent, so `agent-peer`
+gives them a shared Unix Domain Socket transport plus a blocking `wait` that
+plays the same role. Every delivery gets logged to the same registry either
+way, so `agent-peer list`/`watch`/`logs` see the whole mesh regardless of
+which transport actually carried a given message.
 
 ## Highlights
 
@@ -109,15 +115,17 @@ agent-peer watch -s my-app-fe   # just one session
 
 ## Teaching a harness about `agent-peer`
 
-[`skills/`](./skills) ships a ready `SKILL.md` per harness (agy, pi, opencode)
-plus a README explaining exactly where and how to install it — each harness
-turned out to have a genuinely different convention for skill location,
-frontmatter, and trigger mechanism, verified against its own source/docs
-rather than assumed.
+[`skills/`](./skills) ships a ready `SKILL.md` per harness (agy, pi, opencode,
+Codex CLI) plus a README explaining exactly where and how to install it —
+each harness turned out to have a genuinely different convention for skill
+location, frontmatter, and trigger mechanism, verified against its own
+source/docs rather than assumed.
 
 ## Architecture
 
-Claude Code enforces process ownership before accepting an IPC connection:
+**Antigravity, `pi`, and opencode** go through agent-peer's own Unix Domain
+Socket transport, which mirrors the handshake Claude Code enforces for its
+native sessions:
 
 1. **PID validation** — the target process must actually be running.
 2. **Start-time verification** — matches `ps -o lstart=` against the
@@ -126,8 +134,14 @@ Claude Code enforces process ownership before accepting an IPC connection:
 4. **Message frame** — `{"type":"user","priority":"now","from":"...","message":{"content":"..."}}`.
 
 `agent-peer` handles this handshake, socket binding, token generation, and
-session cleanup automatically — see the diagram at the top for how a message
-actually travels from one harness to another.
+session cleanup automatically.
+
+**Claude Code and Codex CLI** skip all of that — `agent-peer send` detects
+the target's real protocol and uses it directly (Claude's own `/peer` socket,
+or `codex queue --thread <uuid>` for a Codex session registered with
+`agent-peer listen --codex-thread <uuid>`). Either way the delivery is still
+recorded to `~/.agent-peer/inbox.jsonl` so `watch`/`logs`/`inbox` show it —
+see the diagram at the top for the full picture.
 
 ## Docs
 

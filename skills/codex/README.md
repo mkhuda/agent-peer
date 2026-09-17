@@ -1,0 +1,62 @@
+# agent-peer skill for Codex CLI
+
+## Install
+
+Codex discovers `SKILL.md` files under `.agents/skills/<name>/` (walking up
+to the repo root), or globally under `~/.agents/skills/<name>/`. Pick **one**
+location — installing to both makes the same skill show up twice in
+`/skills`. A global personal install is usually what you want:
+
+```bash
+mkdir -p ~/.agents/skills/agent-peer
+cp "$(pwd)/SKILL.md" ~/.agents/skills/agent-peer/SKILL.md
+```
+
+Use a real copy, not a symlink — a live Codex session did not pick up a
+symlinked `SKILL.md` until it was replaced with an actual file. Re-run the
+`cp` after editing the source to pick up changes.
+
+Project-local install (this repo's own skill, visible only inside it) works
+the same way, just under `.agents/skills/agent-peer/` in the repo root
+instead of `~/.agents/skills/`.
+
+## Convention notes
+
+(Verified live against a real Codex CLI session — `codex-test`, 2026-09-17 —
+not assumed from generic docs.)
+
+- **Discovery locations:** repo `.agents/skills/<name>/SKILL.md` (searched
+  upward to the repo root), user `~/.agents/skills/<name>/SKILL.md`, admin
+  `/etc/codex/skills/<name>/SKILL.md`, plus system/plugin skills (this
+  machine also has `~/.codex/skills/.system`). Same Agent-Skills-standard
+  directory-with-`SKILL.md` shape other harnesses (opencode, Copilot CLI) use.
+- **Trigger:** both **implicit** (surfaced to the model by description match)
+  and **explicit** — `/skills`, or mentioning a skill by name with `$skill-name`.
+- **Instruction loading:** Codex reads `AGENTS.md` before starting work — both
+  a global override under `~/.codex/` and any project-path `AGENTS.md` files.
+  This repo's own `AGENTS.md` is picked up automatically; no separate
+  bootstrap step needed for the working-contract rules.
+- **Hooks/MCP:** `~/.codex/hooks.json` and `config.toml`'s `hooks = true`
+  wire up lifecycle hooks (`SessionStart`, `PreToolUse`, `PostToolUse`, etc.,
+  including async ones). Not required for `agent-peer` itself, but relevant
+  context if a future skill needs to auto-register on session start instead
+  of an explicit `listen` call.
+- **Background execution:** unlike pi and opencode, Codex's exec tool
+  supports **real long-running background sessions** — `agent-peer listen`
+  stays alive and reachable without being manually detached with `&`, and
+  `agent-peer wait` was confirmed to block correctly and return the instant
+  a peer message arrived (round-tripped live against a Claude Code session).
+- **Sandbox:** a default sandbox profile blocks the socket bind (`/tmp/cc-socks/`)
+  and the `ps` call used for engine auto-detection until explicitly approved
+  — expect one approval prompt per command shape (`agent-peer listen`,
+  `agent-peer wait`) on first use, then it's remembered for the session.
+- **Native inbound delivery:** Codex has its own inter-session push, `codex
+  queue --thread <uuid> --message ...`, built on the Codex App Server. There
+  is no env var exposing "my own thread UUID" to a subprocess (checked
+  against `openai/codex` issues #8923 and #5912 — an open, unshipped
+  request), so it has to be read from `~/.codex/thread-writer-locks/` or
+  `~/.codex/session_index.jsonl` and passed explicitly via `agent-peer listen
+  --codex-thread <uuid>`. Once registered that way, `agent_peer/sender.py`
+  routes `agent-peer send` to that session through `codex queue` instead of
+  the file-based inbox — confirmed live: the recipient received it without
+  ever calling `wait`.

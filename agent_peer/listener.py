@@ -25,9 +25,10 @@ from .protocol import (
 from .inbox import append_inbox, mark_session_start
 
 class PeerListener:
-    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None):
+    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None):
         self.name = name
         self.agent_type = agent_type or "AGENT"
+        self.codex_thread_id = codex_thread_id
         self.pid = os.getpid()
         self.cwd = cwd or os.getcwd()
         self.session_id = str(uuid.uuid4())
@@ -104,6 +105,11 @@ class PeerListener:
             "procStart": proc_start,
             "version": "2.1.270",
             "peerProtocol": 1,
+            # Marks this as one of our own listener processes (agy/pi/opencode/
+            # Codex fallback) - real native Claude Code sessions never set this,
+            # which is how the sender tells whether it needs to log the delivery
+            # itself (nothing else will, since there's no listener.py on that side).
+            "managedByAgentPeer": True,
             "agentType": self.agent_type,
             "peerFeatures": [
                 "notify_idle",
@@ -121,6 +127,8 @@ class PeerListener:
             "updatedAt": now_ms,
             "statusUpdatedAt": now_ms
         }
+        if self.codex_thread_id:
+            session_data["codexThreadId"] = self.codex_thread_id
         with open(self.json_path, "w", encoding="utf-8") as f:
             json.dump(session_data, f)
 
