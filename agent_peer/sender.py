@@ -9,7 +9,7 @@ def send_message(
     target: str,
     content: str,
     priority: str = "now",
-    from_name: str = "antigravity",
+    from_name: str = "agent",
     from_sock: Optional[str] = None,
     timeout: float = 5.0
 ) -> Dict[str, Any]:

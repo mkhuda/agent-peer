@@ -141,17 +141,10 @@ def extract_recipient_info(record: dict, session_cache: Dict[str, Dict[str, str]
         else:
             recip_name = f"pid-{pid_str}"
 
-    # Smart inference for legacy records where recipient wasn't explicitly logged
+    # Should be rare - the listener always populates these fields. Fall back
+    # to something honest rather than guessing.
     if not recip_name or recip_name == "peer":
-        sender_raw = record.get("from", "").lower()
-        content = record.get("content", "").lower()
-        if "72769" in sender_raw or "29258" in sender_raw or "from antigravity" in content:
-            recip_name = "antigravity-2"
-        elif "71277" in sender_raw or "from antigravity-2" in content:
-            recip_name = "antigravity"
-        else:
-            # Messages from Claude sessions (projects-00, fe, etc.) to the UDS mesh listener were addressed to antigravity
-            recip_name = "antigravity"
+        recip_name = "unknown"
 
     agent_type = resolve_agent_type(recip_name, session_cache)
     return recip_name, agent_type

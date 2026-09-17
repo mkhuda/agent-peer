@@ -14,9 +14,8 @@ CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
 LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 
 def ensure_dirs():
-    # Only our own directories are locked to owner-only (0700) - SOCKET_DIR and
-    # SESSIONS_DIR are shared with Claude Code's own native protocol, not ours
-    # to restrict.
+    # Only our own directories are locked to 0700 - SOCKET_DIR/SESSIONS_DIR
+    # belong to Claude Code's own protocol.
     for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR):
         os.makedirs(d, exist_ok=True)
         try:
@@ -72,12 +71,8 @@ def _ps_field(pid: int, field: str) -> str:
         return ""
 
 def detect_harness_identity(max_depth: int = 6):
-    """
-    Walk up the parent-process chain past generic shell/interpreter wrappers to
-    find the actual agent harness (agy, pi, opencode, ...) that invoked this
-    command. Returns (name, pid) of the first non-generic ancestor found, or
-    (None, None) if nothing distinctive turns up within max_depth hops.
-    """
+    """Walk up the parent-process chain past generic shells to find the
+    calling harness. Returns (name, pid), or (None, None) if none found."""
     pid = os.getppid()
     for _ in range(max_depth):
         if pid <= 1:
@@ -113,7 +108,7 @@ def format_auth_frame(token: str) -> str:
 
 def format_user_frame(
     content: str,
-    from_name: str = "antigravity",
+    from_name: str = "agent",
     from_sock: str = None,
     priority: str = "now",
     to_name: str = None,

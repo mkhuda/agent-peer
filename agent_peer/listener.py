@@ -9,9 +9,8 @@ import shutil
 import threading
 import subprocess
 
-# Bundle id to activate when a notification is clicked (terminal-notifier path only).
-# osascript's own 'display notification' always attributes clicks to Script Editor.app
-# instead of the caller, regardless of script content - see docs/notification-click-target.md.
+# Bundle id to activate on notification click (terminal-notifier path only) -
+# see docs/notification-click-target.md.
 NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"
 from typing import Optional
 
@@ -26,7 +25,7 @@ from .protocol import (
 from .inbox import append_inbox, mark_session_start
 
 class PeerListener:
-    def __init__(self, name: str = "antigravity", cwd: Optional[str] = None, agent_type: Optional[str] = None):
+    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None):
         self.name = name
         self.agent_type = agent_type or "AGENT"
         self.pid = os.getpid()
@@ -125,11 +124,8 @@ class PeerListener:
         with open(self.json_path, "w", encoding="utf-8") as f:
             json.dump(session_data, f)
 
-        # Cursor baseline: nothing received before this point can possibly be
-        # processed yet (accept() only starts in run(), called after setup()
-        # returns), so this is always earlier than any message this session
-        # will actually see - closing the gap where a message sent before this
-        # session's first-ever `wait` call would otherwise be missed.
+        # accept() only starts after setup() returns, so this cursor baseline
+        # is always earlier than any message this session will actually see.
         mark_session_start(self.name)
 
     def cleanup(self):
@@ -249,10 +245,8 @@ class PeerListener:
         except Exception:
             pass
 
-        # 2. Trigger native macOS banner notification with sound.
         # Prefer terminal-notifier so clicking activates NOTIFY_ACTIVATE_BUNDLE_ID
-        # directly - osascript's own notifications always click through to Script
-        # Editor.app instead, no matter what the script does.
+        # directly - see docs/notification-click-target.md.
         try:
             title = f"📬 Message from {sender_label}"
             if shutil.which("terminal-notifier"):

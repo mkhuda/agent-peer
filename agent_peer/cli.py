@@ -61,9 +61,8 @@ def cmd_send(args):
 
 def cmd_listen(args):
     name = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
-    # Engine/agentType is independent of the session name (even a manually-chosen
-    # name should still report the real harness) - detected the same way as the
-    # name auto-detection, via the parent-process chain.
+    # Engine is detected independently of the session name, even if --name
+    # was given manually, so it always reflects the real calling harness.
     harness, _ = detect_harness_identity()
     listener = PeerListener(name=name, agent_type=(harness.upper() if harness else None))
     listener.run()
@@ -92,28 +91,16 @@ def cmd_inbox(args):
         print(f"   {content}\n")
 
 def _warn_if_unreachable(session: str):
-    """
-    If no live listener is registered under this session name, warn (stderr)
-    that nothing can currently reach this session via 'agent-peer send' -
-    'wait' only reads what's already queued, it never opens a socket itself.
-    Deliberately does NOT auto-start a listener: spawning a background process
-    as a side effect of 'wait' would be surprising and risks compounding the
-    stale-listener problem (see docs/stale-listener-detection.md) - the caller
-    should start 'listen' itself, consciously, if it wants to be reachable.
-    """
+    """Warn if no listener is registered for this session - 'wait' only
+    reads the inbox, it never opens a socket itself. Never auto-starts one."""
     try:
         resolve_session(session)
     except Exception:
         print(f"⚠️  No listener running for session '{session}' - you are not reachable via 'agent-peer send' right now. Run 'agent-peer listen' (detached) if you want to be. Proceeding to check for already-queued messages...", file=sys.stderr)
 
 def _reset_status_idle(session: str):
-    """
-    Best-effort: after successfully reading messages, reset this session's
-    registered status back to 'idle'. listener.py only ever sets 'new-msg' when
-    a message arrives and never clears it, so without this 'agent-peer list'
-    shows 'new-msg' forever after the first message, even once everything has
-    been read via 'wait' - confirmed live across agy/pi/opencode sessions.
-    """
+    """Best-effort: reset status back to 'idle' after wait reads a message -
+    listener.py sets 'new-msg' but never clears it on its own."""
     try:
         session_data, _, _ = resolve_session(session)
         json_path = os.path.join(SESSIONS_DIR, f"{session_data['pid']}.json")
@@ -129,17 +116,14 @@ def _reset_status_idle(session: str):
 def cmd_wait(args):
     """Wait for unread messages (backlog or next arrival), print them, exit 0 (triggering agent wakeup)."""
     timeout = args.timeout if args.timeout > 0 else None
-    # No explicit --name/$AGENT_PEER_NAME: auto-detect the calling harness (agy,
-    # pi, opencode, ...) instead of falling back to the merged global inbox, so
-    # 'wait' works out of the box without any per-harness configuration.
+    # No explicit --name: auto-detect the calling harness instead of falling
+    # back to the merged global inbox.
     session = args.session or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
     _warn_if_unreachable(session)
 
-    # Guard against a second 'wait' for the same session running concurrently
-    # (e.g. a harness spawning a new one without closing the previous) - both
-    # would otherwise race to read the same cursor and could double-deliver
-    # the same message. Lock is released automatically by the OS on exit/crash.
+    # Guard against a second concurrent 'wait' for the same session racing
+    # the same cursor. Lock releases automatically on exit/crash.
     lock_path = get_lock_path(session)
     lock_file = open(lock_path, "w")
     try:
@@ -201,9 +185,8 @@ def cmd_status(args):
     print("\n\n".join(sections))
 
 def cmd_agy_live_5h(args):
-    """Internal plumbing for statusline.sh's own throttled self-refresh —
-    not meant to be run directly. Always prints JSON; exit code signals
-    success (0) vs failure (1) for the caller's own circuit-breaker logic."""
+    """Internal plumbing for statusline.sh's own self-refresh, not meant
+    to be run directly."""
     result, error = agy_live.fetch_live_5h_quota()
     print(json.dumps({"result": result, "error": error}))
     sys.exit(1 if error else 0)

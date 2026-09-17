@@ -1,11 +1,5 @@
-"""Fetches Claude Code's own usage/quota straight from Anthropic's API.
-
-Much simpler than the agy side: Claude Code's OAuth token (from the macOS
-Keychain, or ~/.claude/.credentials.json as a fallback) is directly accepted
-by `GET /api/oauth/usage` — no special client identification headers, no
-per-product license gate. Mirrors what `claude-swap` does, trimmed down to
-"read the currently active account" instead of full multi-account switching.
-"""
+"""Fetches Claude Code's own usage/quota from Anthropic's API using its
+OAuth token from the macOS Keychain. See docs/status.md for the rationale."""
 
 import hashlib
 import json
@@ -24,19 +18,16 @@ CREDENTIALS_FILE = Path.home() / ".claude" / ".credentials.json"
 
 
 def _hashed_keychain_service(config_dir: str) -> str:
-    """Mirrors Claude Code's own hashing of CLAUDE_CONFIG_DIR (see claude-swap's
-    session.keychain_service_name) — must hash the exact exported string, not a
-    resolved path, or it names a different (empty) keychain item."""
+    """Mirrors Claude Code's own hashing of CLAUDE_CONFIG_DIR - must hash the
+    exact exported string, not a resolved path, or it names an empty keychain item."""
     normalized = unicodedata.normalize("NFC", config_dir)
     digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:8]
     return f"{DEFAULT_KEYCHAIN_SERVICE}-{digest}"
 
 
 def _active_keychain_services() -> list[str]:
-    """Which keychain service(s) hold *this environment's* active credential —
-    same resolution order Claude Code itself uses, so a profile switched via
-    `claude-swap`/`CLAUDE_CONFIG_DIR` is picked up instead of always reading
-    the default profile's slot."""
+    """Which keychain service holds this environment's active credential,
+    following the same CLAUDE_CONFIG_DIR resolution order Claude Code itself uses."""
     secure_env = os.environ.get("CLAUDE_SECURESTORAGE_CONFIG_DIR")
     if secure_env is not None:
         return [DEFAULT_KEYCHAIN_SERVICE] if not secure_env else [_hashed_keychain_service(secure_env)]
@@ -155,10 +146,8 @@ def _reset_in_seconds(resets_at: str | None) -> int | None:
 
 
 def get_claude_status_dict() -> dict:
-    """The trimmed, JSON-friendly shape — normalized to remaining_pct (same
-    convention as get_agy_status_dict()'s quota) even though Anthropic's API
-    reports utilization (used%); drops the many null placeholder fields
-    (unreleased-feature codenames) the raw response carries."""
+    """JSON shape normalized to remaining_pct, flipping Anthropic's raw
+    utilization% and dropping unreleased-feature placeholder fields."""
     data, meta, error = fetch_claude_usage()
     if error:
         return {"error": error}

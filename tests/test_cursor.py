@@ -1,10 +1,5 @@
-"""
-The unread-cursor / backlog-merge contract for `agent-peer wait`.
-
-Ported from the ad-hoc scratchpad scripts used to build and verify this
-feature (see docs/wait-unread-cursor.md and .dev/HANDOFF.md) into a
-permanent regression suite.
-"""
+"""The unread-cursor / backlog-merge contract for `agent-peer wait`.
+See docs/wait-unread-cursor.md for the design."""
 
 import glob
 import json
@@ -82,10 +77,8 @@ class WaitBacklogTest(unittest.TestCase):
         self.assertNotIn("first", result.stdout)
 
     def test_clear_resets_the_cursor_without_reopening_the_old_gap(self):
-        """`inbox --clear` must not simply delete the cursor file: doing so
-        reopens the exact race mark_session_start() exists to close (a
-        message sent between the clear and the next `wait` would otherwise
-        be lazily treated as "already old"). See docs/wait-unread-cursor.md."""
+        """`inbox --clear` must reset the cursor, not delete it - deleting
+        it would let the next message be treated as "already old"."""
         self.send("before clear")
         run_cli(["wait", "--name", SESSION, "--timeout", "3"], self.home)
 

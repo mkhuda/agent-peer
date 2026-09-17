@@ -7,9 +7,8 @@ from typing import List, Dict, Any, Optional
 from .protocol import INBOX_FILE, get_session_inbox_path, get_cursor_path, ensure_dirs
 
 def _secure(path: str):
-    """Restrict to owner-only, matching the socket/key file permissions - these
-    files carry full inter-agent message content in plain text (see
-    docs/agent-peer-weaknesses-report.md)."""
+    """Restrict to owner-only, matching the socket/key file permissions -
+    these files carry full message content in plain text."""
     try:
         os.chmod(path, 0o600)
     except OSError:
@@ -68,12 +67,8 @@ def clear_inbox(session: Optional[str] = None):
     if os.path.exists(path):
         with open(path, "w", encoding="utf-8") as f:
             f.write("")
-    # Reset the cursor too, so "clear" means forget everything - not just empty
-    # the log while leaving stale read-state behind. Written to now(), NOT
-    # deleted: deleting it would reopen the exact gap mark_session_start() was
-    # added to close - the next _read_cursor() call would lazily default the
-    # cursor to whenever that read happens to occur, so anything sent between
-    # this clear and the next 'wait' would be silently swallowed as "old".
+    # Written to now(), not deleted: deleting it would let the next message
+    # get lazily treated as "already old" before the next 'wait' call.
     _write_cursor(session, time.time())
 
 def _read_cursor(session: Optional[str] = None) -> float:
@@ -99,13 +94,8 @@ def _write_cursor(session: Optional[str] = None, ts: Optional[float] = None):
     _secure(path)
 
 def mark_session_start(session: Optional[str] = None):
-    """
-    Initialize this session's unread cursor to now. Call this once the listener
-    is actually ready to receive (end of setup(), before accept() ever runs) so
-    a message sent before this session's first-ever `wait` call still counts as
-    unread, instead of being silently swallowed by the lazy cursor-init fallback
-    in _read_cursor (which exists for sessions that predate this feature).
-    """
+    """Initialize the unread cursor to now - call this once the listener is
+    ready to receive, so a message sent before the first 'wait' still counts."""
     _write_cursor(session, time.time())
 
 def get_unread(session: Optional[str] = None) -> List[Dict[str, Any]]:

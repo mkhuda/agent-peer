@@ -1,11 +1,5 @@
-"""
-Inbox/cursor/lock files and directories must be owner-only.
-
-Regression test for the file-permission gap found across all three external
-reviews (agy, pi, opencode) plus the earlier weaknesses report: these files
-carry full inter-agent message content in plain text but were created with
-the default umask instead of chmod 0600/0700 like the socket and key file.
-"""
+"""Inbox/cursor/lock files and directories must be owner-only - they carry
+full message content in plain text."""
 
 import glob
 import os

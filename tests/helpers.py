@@ -1,15 +1,5 @@
-"""
-Shared test helpers.
-
-Every test that touches persistent state drives the real `agent-peer` CLI as a
-subprocess with an isolated $HOME, rather than importing agent_peer modules
-in-process. This is deliberate, not just caution: protocol.py computes paths
-like AGENT_PEER_DIR at *import time* from $HOME, and inbox.py/cli.py bind
-those values with `from .protocol import X` - so once any test in a shared
-process has imported agent_peer once, changing $HOME afterwards does not
-change what those already-bound names point to. Subprocess isolation sidesteps
-that entirely and also happens to test the real entry point users invoke.
-"""
+"""Shared test helpers. Tests drive the real CLI as a subprocess with an
+isolated $HOME rather than importing agent_peer, since its paths are bound at import time and would go stale across tests sharing one process."""
 
 import os
 import subprocess
@@ -43,9 +33,7 @@ def run_cli(args, home, timeout=10, input=None):
 
 
 def spawn_cli(args, home, stdout=subprocess.PIPE, stderr=subprocess.PIPE):
-    """Start `python -m agent_peer <args>` in the background (for `listen` and
-    long-blocking `wait` calls) and return the live subprocess.Popen. Caller
-    is responsible for terminating it."""
+    """Start the CLI in the background; caller must stop_cli() it."""
     env = dict(os.environ, HOME=home)
     return subprocess.Popen(
         [sys.executable, "-m", "agent_peer"] + args,

@@ -1,22 +1,5 @@
-"""Direct, on-demand fetch of agy's 5-hour quota window from Google's
-internal Cloud Code Assist API (`fetchAvailableModels`) — the same call
-`agy` itself makes.
-
-Deliberately narrow in scope and behavior:
-- Only the 5h window: `fetchAvailableModels`'s response carries just one
-  quota window per model, matching the 5h reset time. There's no weekly
-  figure in it (checked directly) and no context-window usage either (agy
-  computes that locally, not via any API) — those stay cache-only, from the
-  statusline bridge (see agy_status.py).
-- Only called on demand, once per `agent-peer status` invocation — never a
-  background timer. This hits an undocumented `v1internal` endpoint not
-  published for third-party use, so the safe usage shape is "ride along with
-  an explicit check", not autonomous polling.
-- Never retries and never raises: any failure returns (None, reason) and the
-  caller falls back to the (possibly stale) cached numbers instead. A string
-  of failures should make a human stop calling this, not spin a retry loop
-  that keeps hammering the endpoint.
-"""
+"""On-demand fetch of agy's 5-hour quota via Google's internal
+fetchAvailableModels API. See docs/status.md for the full rationale."""
 
 from __future__ import annotations
 
@@ -95,12 +78,8 @@ def fetch_live_5h_quota() -> tuple[dict | None, str | None]:
     except Exception as e:
         return None, f"fetchAvailableModels failed: {e}"
 
-    # Collect every model's entry per provider group, then keep the *most
-    # constrained* one (lowest remainingFraction) — not just the first match.
-    # Some models in each group are quota-exempt (remainingFraction=1,
-    # resetTime=None, e.g. internal preview/tab models) and would otherwise
-    # get picked arbitrarily depending on dict order, silently reporting
-    # "100%, no reset" for a pool that's actually partially used.
+    # Keep the most-constrained model per group (lowest remainingFraction) -
+    # a quota-exempt model reports 100%/no-reset, masking a partially-used pool.
     buckets: dict[str, list[dict]] = {"gemini_5h": [], "claude_gpt_5h": []}
     for model in (data.get("models") or {}).values():
         quota_info = model.get("quotaInfo")

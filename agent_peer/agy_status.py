@@ -1,9 +1,5 @@
-"""Reads the agy/Antigravity quota + context snapshot bridged over from its
-statusline hook (see ~/.gemini/antigravity-cli/statusline.sh), then freshens
-the 5h quota numbers with a live, on-demand call (see agy_live.py) since
-that's the one piece worth being right-now-accurate for a continue-or-handoff
-decision. Weekly quota and context window have no API source at all — agy
-computes/reports those itself — so they always come from the cache."""
+"""Reads agy's cached quota/context snapshot and freshens the 5h quota
+numbers live (see agy_live.py). See docs/status.md for the full rationale."""
 
 import os
 import time
@@ -67,9 +63,8 @@ def fmt_duration(seconds):
 
 
 def get_agy_status_dict() -> dict:
-    """The trimmed, JSON-friendly shape — every remaining_pct here means the
-    same thing (higher = more headroom), so this can be compared directly
-    against get_claude_status_dict()'s quota without re-deriving anything."""
+    """JSON shape where remaining_pct is directly comparable to
+    get_claude_status_dict()'s, regardless of each provider's raw convention."""
     payload, age_seconds, error = read_agy_status()
     if error:
         return {"error": error}
@@ -90,9 +85,7 @@ def get_agy_status_dict() -> dict:
             else None
         )
 
-    # The 5h numbers are the ones most likely to matter for a right-now
-    # decision — freshen just those with a live call. Weekly + context have
-    # no API source (see agy_live.py's docstring), so they stay cache-only.
+    # Freshen just the 5h numbers live; weekly + context have no API source.
     live, live_error = agy_live.fetch_live_5h_quota()
     if live:
         for key in ("gemini_5h", "claude_gpt_5h"):

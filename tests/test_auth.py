@@ -1,11 +1,5 @@
-"""
-The peer auth handshake must actually be enforced.
-
-Regression test for the auth-bypass bug found this session: `authenticated`
-was computed in listener.py's handle_client() but never checked before a
-frame got processed, so any connection could inject a message without ever
-sending a valid (or any) auth frame. See .dev/HANDOFF.md.
-"""
+"""The peer auth handshake must actually be enforced - a frame must not be
+processed until a valid auth token has been received on that connection."""
 
 import glob
 import json
