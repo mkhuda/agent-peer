@@ -42,14 +42,19 @@ block-until-woken exactly like a native Claude Code session.
 ## Install
 
 ```bash
+uv tool install agent-peer
+```
+
+No `uv`? `pipx install agent-peer` or `python3 -m pip install --user agent-peer`
+work the same way. All three put a global `agent-peer` command on your PATH.
+
+**Contributing or tracking `main` instead of a release?**
+```bash
 git clone https://github.com/mkhuda/agent-peer.git
 cd agent-peer
 uv tool install --editable . --force
 ```
-
-This installs the global `agent-peer` command (`~/.local/bin/agent-peer`) as
-an editable install, so pulling updates takes effect immediately with no
-reinstall. Prefer plain pip? `python3 -m pip install -e .` works the same way.
+An editable install means source changes take effect immediately, no reinstall.
 
 ## Usage
 
