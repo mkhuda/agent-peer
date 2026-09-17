@@ -1,0 +1,93 @@
+name: release
+
+# Publishing happens from a tag on a clean runner rather than from a laptop,
+# so what reaches PyPI is exactly what the tag contains. Nothing here holds a
+# credential: PyPI trusts this repository and workflow directly (Trusted
+# Publishing) via the `pypi` environment below.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: the tag says what the source says
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Tag matches the version in the package
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          src=$(python -c "import agent_peer; print(agent_peer.__version__)")
+          if [ "$tag" != "$src" ]; then
+            echo "tag is $tag but agent_peer says $src" >&2
+            exit 1
+          fi
+          grep -q "## $src" CHANGELOG.md || {
+            echo "CHANGELOG.md has no entry for $src" >&2; exit 1; }
+
+      - name: Build the wheel and the sdist
+        run: |
+          python -m pip install --quiet build
+          python -m build --outdir dist
+
+      - name: The built wheel actually runs
+        run: |
+          python -m pip install --quiet dist/*.whl
+          agent-peer --version
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  pypi:
+    name: publish to PyPI
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # this is the whole credential: a short-lived token minted for this run
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github:
+    name: attach release notes
+    needs: verify
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract this version's section from CHANGELOG.md
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          awk -v ver="## $version" '
+            $0 == ver { found=1; next }
+            found && /^## / { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "no notes for $version" >&2; exit 1; }
+
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release edit "$GITHUB_REF_NAME" --title "agent-peer $version" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "agent-peer $version" --notes-file notes.md
+          fi

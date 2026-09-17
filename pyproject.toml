@@ -4,19 +4,30 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agent-peer"
-version = "0.1.0"
-description = "Universal IPC mesh & real-time peer gateway between Claude Code sessions and external agents (Antigravity, Hermes, etc.)"
+dynamic = ["version"]
+description = "A local IPC mesh so any agent harness (Claude Code, Antigravity, pi, opencode, ...) can find, message, and reactively wake up any other."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [
-    { name = "M Khuda", email = "rg@local" }
+    { name = "M. Khoirul Huda", email = "rg@local" }
+]
+keywords = [
+    "cli",
+    "ipc",
+    "agents",
+    "claude-code",
+    "antigravity",
+    "opencode",
+    "developer-tools",
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
     "Environment :: Console",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
@@ -26,9 +37,19 @@ classifiers = [
     "Topic :: Communications",
     "Topic :: Software Development :: Build Tools",
 ]
+# There are none, and the whole design depends on there being none.
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/mkhuda/agent-peer"
+Changelog = "https://github.com/mkhuda/agent-peer/blob/main/CHANGELOG.md"
+Issues = "https://github.com/mkhuda/agent-peer/issues"
 
 [project.scripts]
 agent-peer = "agent_peer.cli:main"
+
+[tool.hatch.version]
+path = "agent_peer/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_peer"]

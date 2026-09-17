@@ -14,6 +14,7 @@ from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
 from .protocol import get_lock_path, auto_session_name, detect_harness_identity, SESSIONS_DIR
 from . import agy_live
+from . import __version__
 
 def cmd_list(args):
     sessions = get_active_sessions()
@@ -217,6 +218,7 @@ def main():
         prog="agent-peer",
         description="Universal IPC mesh & real-time peer gateway between Claude Code sessions and external agents"
     )
+    parser.add_argument("-v", "--version", action="version", version=f"agent-peer {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # list
