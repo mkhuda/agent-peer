@@ -138,10 +138,13 @@ session cleanup automatically.
 
 **Claude Code and Codex CLI** skip all of that — `agent-peer send` detects
 the target's real protocol and uses it directly (Claude's own `/peer` socket,
-or `codex queue --thread <uuid>` for a Codex session registered with
-`agent-peer listen --codex-thread <uuid>`). Either way the delivery is still
-recorded to `~/.agent-peer/inbox.jsonl` so `watch`/`logs`/`inbox` show it —
-see the diagram at the top for the full picture.
+or `codex queue --thread <uuid>` for a Codex session). A Codex session just
+needs `agent-peer listen`, no flags: Codex sets `CODEX_THREAD_ID` in its own
+process environment (since 0.154.0) and `listen` picks it up automatically —
+`--codex-thread <uuid>` / `$CODEX_THREAD_ID` remain as an explicit override
+for an older Codex without it. Either way the delivery is still recorded to
+`~/.agent-peer/inbox.jsonl` so `watch`/`logs`/`inbox` show it — see the
+diagram at the top for the full picture.
 
 ## Docs
 

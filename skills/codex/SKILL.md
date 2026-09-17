@@ -1,6 +1,6 @@
 ---
 name: agent-peer
-description: Use when collaborating with other agent sessions (Claude Code, Antigravity/agy, pi, opencode) via the agent-peer IPC mesh — sending real-time messages, receiving task directives, or getting native reactive delivery via 'codex queue'.
+description: Use when collaborating with other agent sessions (Claude Code, Antigravity/agy, pi, opencode) via the agent-peer IPC mesh — sending real-time messages or becoming reachable for native reactive delivery via 'codex queue'.
 ---
 
 `agent-peer` is a local IPC mesh connecting agent sessions on this machine
@@ -8,21 +8,20 @@ description: Use when collaborating with other agent sessions (Claude Code, Anti
 200ms. Source + full docs: `~/projects/agent-peer/README.md`.
 
 Codex is one of two harnesses here with **native inbound delivery** (the
-other is Claude Code) — register your own thread UUID once and incoming
-messages arrive via `codex queue` on their own, no blocking `wait` loop
-required.
+other is Claude Code) — `listen` once and incoming messages arrive via
+`codex queue` on their own. **You never need `wait`.**
 
 ## Commands
 
 ```bash
-agent-peer list                                    # discover reachable sessions and their names
-agent-peer send <peer> "message"                   # send instantly, by name or PID
-agent-peer listen --codex-thread <your-thread-uuid> # become natively reachable (see below)
-agent-peer inbox [--name <name>]                    # view recent messages received
+agent-peer list                  # discover reachable sessions and their names
+agent-peer send <peer> "message" # send instantly, by name or PID
+agent-peer listen                # become natively reachable - that's it
+agent-peer inbox [--name <name>] # view recent messages received
 ```
 
-`--name` is optional everywhere above. Leave it out and it auto-detects a
-stable session name from your own process identity (e.g. `codex-<pid>`).
+`--name` is optional. Leave it out and it auto-detects a stable session name
+from your own process identity (e.g. `codex-<pid>`).
 
 ## First run: your sandbox may prompt for approval
 
@@ -31,55 +30,37 @@ process info via `ps` to detect your engine. A default Codex sandbox blocks
 both until approved. Approve once ("always run commands that start with
 `agent-peer listen`") and it works for the rest of the session.
 
-## Becoming natively reachable (`agent-peer listen --codex-thread`)
+## Becoming natively reachable (`agent-peer listen`)
 
-Find your own thread UUID first — there's no env var for it (checked; not
-shipped), so read it from Codex's own state:
-
-```bash
-cat ~/.codex/thread-writer-locks/*.lock   # filenames are the UUIDs of currently-open threads
-```
-
-If exactly one `.lock` file exists, that's you. If more than one Codex
-session is open on this machine at once, cross-check against
-`~/.codex/session_index.jsonl`'s `thread_name` for one that matches your own
-conversation, or ask the operator which one is yours — don't guess.
+Just run it - no flags needed:
 
 ```bash
-agent-peer listen --name <your-name> --codex-thread <the-uuid-you-found>
+agent-peer listen
 ```
+
+Codex sets `CODEX_THREAD_ID` in your own process environment (confirmed
+live: it matches your session's real thread UUID exactly), and `listen`
+reads it automatically. Once registered, `agent-peer send <your-name> ...`
+from any peer delivers via `codex queue` straight into your session -
+confirmed live, no `wait` involved.
 
 `listen` never exits on its own. Codex's exec tool supports real background
-sessions, so start it detached and keep working — no need to wrap it with
-`&` yourself. Once registered with `--codex-thread`, `agent-peer send
-<your-name> ...` from any peer delivers via `codex queue` straight into your
-session — confirmed live: it surfaced without ever calling `wait`.
+sessions, so start it detached and keep working - no need to wrap it with
+`&` yourself.
 
-## Fallback: reactive standby (`agent-peer wait`)
+## Don't use `agent-peer wait` here
 
-Only needed if you couldn't determine your own thread UUID, or you want to
-also read anything that landed before you registered. Never poll
-`agent-peer inbox` in a sleep loop — run `agent-peer wait` and let it block,
-it exits the moment a message arrives:
-
-- It self-tracks what you've already read (per-session cursor). If messages
-  queued up while you were busy, it returns **all of them at once, instantly,
-  merged** — not just the latest one.
-- Don't pass a timeout, and don't wrap the call in a tool-level timeout
-  either — a killed `wait` with no message just means calling it again,
-  which is a polling loop by another name. Let the call sit open until a
-  message actually arrives, however long that takes.
-- Only one `wait` may run per session at a time. A second one for the same
-  session fails immediately (exit code 1) instead of racing the first.
-- The blocked process itself costs nothing while it sits there (plain
-  OS-level block, confirmed live: 48s idle, zero output, until a message
-  woke it). Don't narrate periodic "still waiting" status updates while it
-  runs — that costs real tokens on your side and defeats the point of a
-  zero-poll design; just let the call sit open silently.
+It works (confirmed live), but Codex's own runtime doesn't allow a truly
+unbounded blocking call - a long `wait` gets cut into repeated turns every
+~60s, and each cut costs you a turn even though nothing happened. That's
+real cost for zero benefit when `listen` already gets you native delivery
+for free. Only reach for `wait` as a one-shot check (call it, let it return
+quickly or time out, don't leave it standing open) - never as your standby
+loop.
 
 ## Sending messages
 
-- Don't dump large raw text/diffs into the message — write findings to a file
+- Don't dump large raw text/diffs into the message - write findings to a file
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).

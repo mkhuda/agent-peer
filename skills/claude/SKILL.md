@@ -27,10 +27,12 @@ handles that registration and delivery, `agent-peer` only reads/writes it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
 
-## Talking to a non-Claude peer (agy, pi, opencode, Codex)
+## Talking to a non-Claude peer
 
-Those harnesses don't have native push — they only receive messages while
-actively running `agent-peer wait` on their side. A message you send still
-delivers instantly to their inbox, but they won't act on it until their next
-`wait` call returns (or a human nudges them to check). Don't expect the same
-immediacy you get for another Claude Code session.
+Codex has native push too (via `codex queue`, once it's run `agent-peer
+listen`) - a message to a Codex peer arrives just as immediately as to
+another Claude Code session. Antigravity, `pi`, and opencode don't have a
+native equivalent: they only receive messages while actively running
+`agent-peer wait` on their side. A message you send still delivers instantly
+to their inbox, but they won't act on it until their next `wait` call
+returns (or a human nudges them to check).

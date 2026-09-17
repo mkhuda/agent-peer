@@ -51,12 +51,18 @@ not assumed from generic docs.)
   — expect one approval prompt per command shape (`agent-peer listen`,
   `agent-peer wait`) on first use, then it's remembered for the session.
 - **Native inbound delivery:** Codex has its own inter-session push, `codex
-  queue --thread <uuid> --message ...`, built on the Codex App Server. There
-  is no env var exposing "my own thread UUID" to a subprocess (checked
-  against `openai/codex` issues #8923 and #5912 — an open, unshipped
-  request), so it has to be read from `~/.codex/thread-writer-locks/` or
-  `~/.codex/session_index.jsonl` and passed explicitly via `agent-peer listen
-  --codex-thread <uuid>`. Once registered that way, `agent_peer/sender.py`
-  routes `agent-peer send` to that session through `codex queue` instead of
-  the file-based inbox — confirmed live: the recipient received it without
-  ever calling `wait`.
+  queue --thread <uuid> --message ...`, built on the Codex App Server.
+  `CODEX_THREAD_ID` (and `CODEX_SESSION_ID`, same value) **is** set in the
+  process environment as of Codex 0.154.0 — confirmed live by reading `env`
+  inside a real session, contradicting an earlier check of `openai/codex`
+  issues #8923/#5912 that found it unshipped (likely just landed since).
+  `agent-peer listen` reads it automatically, no flag needed;
+  `--codex-thread <uuid>` / `$CODEX_THREAD_ID` remain available as an
+  explicit override for an older Codex without it. Once registered,
+  `agent_peer/sender.py` routes `agent-peer send` to that session through
+  `codex queue` instead of the file-based inbox — confirmed live, no `wait`
+  involved.
+- **Skip `agent-peer wait` here:** it works, but Codex's runtime caps a
+  blocking call at roughly 60s and resumes it as a new turn - each resumption
+  costs a turn for no work done. `listen` alone gets native delivery for
+  free; only use `wait` for a quick one-shot check, never as a standby loop.

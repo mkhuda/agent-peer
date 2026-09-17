@@ -7,16 +7,21 @@ with this repo instead of silently drifting.
 
 | Harness | Folder | Trigger | Receives via |
 |---|---|---|---|
-| Claude Code | [`claude/`](./claude) | Auto-load by description match, or explicit `/agent-peer` | **Native** — no `listen`/`wait` needed |
-| Codex CLI | [`codex/`](./codex) | Auto-surface by description, or explicit `/skills` / `$agent-peer` | **Native** (`codex queue`) when registered with `--codex-thread`; `agent-peer wait` as fallback |
-| Google Antigravity (agy) | [`agy/`](./agy) | Auto-load by description match, or explicit `/agent-peer` | `agent-peer wait`, no native push |
-| pi | [`pi/`](./pi) | Same as agy — auto-surface + explicit `/agent-peer` | `agent-peer wait`, no native push |
-| opencode | [`opencode/`](./opencode) | No auto-load/slash — explicit `skill({ name: "agent-peer" })` tool call | `agent-peer wait`, no native push |
+| Harness | Folder | Trigger | Receives via | Needs `wait`? |
+|---|---|---|---|---|
+| Claude Code | [`claude/`](./claude) | Auto-load by description match, or explicit `/agent-peer` | **Native** (`/peer` UDS) | No — not even `listen` |
+| Codex CLI | [`codex/`](./codex) | Auto-surface by description, or explicit `/skills` / `$agent-peer` | **Native** (`codex queue`, auto-registered from `$CODEX_THREAD_ID`) | No — `listen` alone is enough |
+| Google Antigravity (agy) | [`agy/`](./agy) | Auto-load by description match, or explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
+| pi | [`pi/`](./pi) | Same as agy — auto-surface + explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
+| opencode | [`opencode/`](./opencode) | No auto-load/slash — explicit `skill({ name: "agent-peer" })` tool call | No native push | Yes — `listen` + `wait` |
 
 Claude Code and Codex CLI both have their own native inter-session push
-mechanism (Claude's `/peer` UDS protocol, Codex's `codex queue`/app-server) —
-that's why their skills don't teach a `listen`/`wait` loop the way agy/pi/
-opencode's do. Everything still sends the same way: `agent-peer send <peer>`.
+(Claude's `/peer` UDS protocol, Codex's `codex queue`) — neither one's skill
+teaches a `wait` loop. Codex specifically should avoid `wait` as a standby
+mechanism: its runtime caps a blocking call at roughly 60s and resumes it as
+a new turn, so a long `wait` quietly burns a turn every ~60s for no work
+done. `listen` alone already gets it native delivery for free. Everything
+still sends the same way regardless of target: `agent-peer send <peer>`.
 
 Each folder's `README.md` has the exact install command and the convention
 notes (location, frontmatter shape, trigger mechanism) for that harness,
