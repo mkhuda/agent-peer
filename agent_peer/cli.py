@@ -204,7 +204,7 @@ def cmd_watch(args):
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-peer",
-        description="Universal IPC mesh & real-time peer gateway between Claude Code sessions and external agents"
+        description="Local IPC mesh for AI coding agents (Claude Code, Codex CLI, Antigravity, pi, opencode) - send messages and wake up any peer session, no polling"
     )
     parser.add_argument("-v", "--version", action="version", version=f"agent-peer {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)

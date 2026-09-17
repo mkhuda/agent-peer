@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "agent-peer"
 dynamic = ["version"]
-description = "A local IPC mesh so any agent harness (Claude Code, Antigravity, pi, opencode, ...) can find, message, and reactively wake up any other."
+description = "A local IPC mesh so any AI coding agent harness (Claude Code, Codex CLI, Antigravity, pi, opencode, ...) can find, message, and reactively wake up any other."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
