@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1
+
+- Fixed invalid author email in package metadata (`rg@local`) that made
+  PyPI reject the 0.2.0 upload outright. No other changes - see 0.2.0 below
+  for everything actually shipped in this release.
+
 ## 0.2.0
 
 Generalized from an Antigravity-only tool into a mesh any harness can join,
