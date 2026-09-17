@@ -1,127 +1,72 @@
-# Rencana: deteksi listener basi (stale) di `agent-peer list`
+# Plan: Stale Listener Detection in `agent-peer list`
 
-## Masalah
+## Problem
 
-Contoh nyata (`agent-peer list`):
+Real example (`agent-peer list`):
 
+```text
+72769    antigravity      AGY   new-msg  yes  72769.sock  ~/projects   <- actively in use
+71277    antigravity-2    AGY   new-msg  yes  71277.sock  ~/projects   <- user closed session in UI
 ```
-72769    antigravity      AGY   new-msg  yes  72769.sock  ~/projects   <- masih dipakai
-71277    antigravity-2    AGY   new-msg  yes  71277.sock  ~/projects   <- user sudah "menutup" sesinya di UI
-```
 
-`antigravity-2` (PID 71277) tetap muncul ALIVE=yes walau user sudah menutup sesi
-itu di Antigravity. Root cause **bukan** PID-reuse:
+`antigravity-2` (PID 71277) remains reported as ALIVE=yes even though the user closed that session in the UI. Root cause **is not** PID-reuse:
 
-- `procStart` di `~/.claude/sessions/71277.json` = `Sun Sep 13 21:31:59 2026`
-- `LC_ALL=C TZ=UTC ps -o lstart= -p 71277` = `Sun Sep 13 21:31:59 2026` (identik)
+- `procStart` in `~/.claude/sessions/71277.json` = `Sun Sep 13 21:31:59 2026`
+- `LC_ALL=C TZ=UTC ps -o lstart= -p 71277` = `Sun Sep 13 21:31:59 2026` (identical)
 
-Jadi proses itu memang literally masih hidup, bukan PID yang dipakai ulang proses
-lain. `agent-peer list` melaporkan "alive" dengan **benar** secara teknis.
+So the process is literally still alive, not a PID reused by another process. `agent-peer list` technically reports "alive" **correctly**.
 
-## Kenapa "deteksi detached" BUKAN solusi (sudah dicoba, salah)
+## Why "Detached Detection" is NOT the Solution (Tried, Incorrect)
 
-Awalnya diduga: proses basi bisa dikenali dari tidak punya controlling terminal
-(TTY `??`) karena sesi UI yang menutupnya tidak sempat kirim SIGTERM/SIGINT.
-Diverifikasi langsung dengan `ps -o pid,ppid,tty,stat -p <pid>` untuk KEDUA proses:
+Initially suspected: stale processes could be identified by having no controlling terminal (TTY `??`) because the UI session that closed did not send SIGTERM/SIGINT.
+Verified directly with `ps -o pid,ppid,tty,stat -p <pid>` for BOTH processes:
 
-```
+```text
 PID    PPID  TTY   STAT   COMMAND
-71277  1     ??    S      agent-peer listen --name antigravity   (basi)
-72769  1     ??    S      agent-peer listen --name antigravity   (masih dipakai aktif)
+71277  1     ??    S      agent-peer listen --name antigravity   (stale)
+72769  1     ??    S      agent-peer listen --name antigravity   (actively in use)
 ```
 
-Keduanya **identik**: `TTY=??`, `PPID=1` (reparented ke `launchd`), `STAT=S`. Proses
-yang sedang aktif dipakai pun sama-sama detached — karena begitu memang cara
-Antigravity men-spawn `agent-peer listen` (background, tanpa terminal), bukan
-tanda proses itu ditinggalkan. Jadi **tidak ada atribut level-OS (TTY/PPID/STAT)
-yang bisa membedakan "basi" vs "masih dipakai"** — keduanya proses yang sama-sama
-sah secara teknis, cuma satu sudah tidak relevan secara *intent* pengguna, dan itu
-bukan sesuatu yang bisa dibaca dari `ps`.
+Both are **identical**: `TTY=??`, `PPID=1` (reparented to `launchd`), `STAT=S`. The actively used process is also detached — because that is how Antigravity spawns `agent-peer listen` (background, without a terminal), not a sign of abandonment. Thus **no OS-level attribute (TTY/PPID/STAT) can distinguish "stale" vs "actively used"** — both are technically legitimate processes, but one is no longer relevant to user intent, which cannot be inferred from `ps`.
 
-## Root cause sebenarnya
+## Actual Root Cause
 
-`cleanup()` (`listener.py:121-138`) — yang menghapus socket, symlink, session json,
-dan key file — cuma terpanggil lewat `_signal_handler` saat proses menerima
-`SIGINT`/`SIGTERM` (`listener.py:262-263`), atau lewat exit loop normal. Menutup
-sesi di UI Antigravity tidak mengirim sinyal itu ke proses `agent-peer listen`
-yang berjalan terpisah di background — jadi proses itu terus hidup selamanya
-sampai dibunuh manual, walau tidak ada yang "memakainya" lagi.
+`cleanup()` (`listener.py:121-138`) — which removes socket, symlink, session JSON, and key files — only gets invoked via `_signal_handler` when the process receives `SIGINT`/`SIGTERM` (`listener.py:262-263`), or via normal loop exit. Closing a session in the UI does not send those signals to the `agent-peer listen` process running separately in the background — so the process lives forever until manually killed, even when no longer used.
 
-Faktor pemicu lain: `PeerListener.setup()` (`listener.py:53-58`) — saat nama sudah
-terpakai oleh sesi lain yang masih alive, dia cuma menambahkan suffix (`-2`, `-3`,
-...) alih-alih menggantikan/mematikan yang lama. Jadi listener basi menumpuk terus
-tanpa pernah tergantikan otomatis.
+Another triggering factor: `PeerListener.setup()` (`listener.py:53-58`) — when a name is already used by another active session, it appends a suffix (`-2`, `-3`, ...) instead of replacing/terminating the old one. Stale listeners accumulate continuously without automatic replacement.
 
-## Dead end lain yang sudah dicoba: cek parent process
+## Another Dead End: Checking Parent Process
 
-Ide: simpan `PPID` saat `agent-peer listen` baru start, lalu anggap "detached/basi"
-kalau parent itu sudah tidak hidup lagi. Diverifikasi langsung, gagal di dua lapis:
+Idea: store `PPID` when `agent-peer listen` starts, then treat as "detached/stale" if that parent is no longer alive. Verified directly, failed on two levels:
 
-1. `ps aux | grep -i antigravity` — **tidak ada proses aplikasi Antigravity yang
-   berjalan lokal sama sekali** yang bisa dijadikan acuan "pemilik sesi". Tidak ada
-   target untuk dicek keberadaannya.
-2. `ps -ef` untuk kedua listener (basi maupun aktif) sama-sama sudah `PPID=1`
-   (`launchd`) — proses yang di-spawn detached langsung ke-reparent ke launchd
-   seketika lahir, jadi bahkan merekam `os.getppid()` di awal `setup()` pun
-   kemungkinan besar sudah dapat `1`, bukan proses pemanggil aslinya. Tidak ada
-   window waktu untuk menangkap sinyal itu.
+1. `ps aux | grep -i antigravity` — **no local Antigravity application process runs at all** that can serve as a "session owner" baseline. There is no target to check for existence.
+2. `ps -ef` for both listeners (stale and active) shows `PPID=1` (`launchd`) — detached spawned processes get reparented to launchd instantly upon birth, so recording `os.getppid()` at `setup()` start yields `1`, not the original caller process. There is no time window to capture that signal.
 
-Kesimpulan: batas "sesi ditutup di UI Antigravity" adalah state internal aplikasi
-Antigravity yang tidak pernah termanifestasi sebagai sinyal OS (proses/parent)
-apapun yang bisa diamati `agent-peer` dari luar. Jangan coba pendekatan
-parent-liveness lagi — sudah terbukti tidak ada channel-nya.
+Conclusion: the boundary of "session closed in UI" is an internal state of the application that never manifests as any observable OS signal (process/parent) for `agent-peer`. Do not attempt parent-liveness approaches again — no channel exists.
 
-## Sinyal yang TERSEDIA untuk deteksi (tidak sempurna, tapi berguna)
+## Signals AVAILABLE for Detection (Imperfect, but Useful)
 
-Karena tidak ada sinyal OS yang pasti, deteksi harus berbasis heuristik di level
-aplikasi:
+Since no definitive OS signal exists, detection must rely on application-level heuristics:
 
-1. **Grup nama duplikat** — sesi dengan pola nama dasar sama (`antigravity`,
-   `antigravity-2`, `antigravity-3`, ...) adalah kandidat kuat "salah satunya basi",
-   karena hanya muncul lewat mekanisme suffix di `listener.py:53-58`, bukan input
-   manual user. Multiple listener hidup bersamaan di bawah base name yang sama itu
-   sendiri sudah sinyal.
-2. **Recency** — `statusUpdatedAt`/`updatedAt` di session json. Yang paling baru
-   diupdate dalam satu grup duplikat kemungkinan besar yang masih relevan; yang
-   lebih lama lebih mencurigakan (bukan bukti mutlak — listener idle lama tapi
-   masih valid juga mungkin).
-3. Tidak ada sinyal yang cukup untuk **auto-kill** dengan aman — keduanya cuma
-   petunjuk untuk manusia, bukan dasar penghapusan otomatis (menyentuh proses
-   hidup + menghapus registrasi adalah aksi destruktif, tidak boleh dilakukan
-   otomatis tanpa konfirmasi).
+1. **Duplicate Name Groups** — sessions with the same base name pattern (`antigravity`, `antigravity-2`, `antigravity-3`, ...) are strong candidates for "one of them being stale", because they only arise via the suffix mechanism in `listener.py:53-58`, not manual user input. Multiple listeners coexisting under the same base name is itself a signal.
+2. **Recency** — `statusUpdatedAt`/`updatedAt` in session JSON. The most recently updated session in a duplicate group is most likely relevant; older ones are suspicious (not absolute proof — long idle valid listeners are also possible).
+3. Insufficient signals for safe **auto-kill** — both are hints for humans, not a basis for automatic deletion (touching running processes + deleting registrations is destructive, never do automatically without confirmation).
 
-## Rencana
+## Plan
 
-Bukan "fix deteksi detached" (karena sinyal itu tidak valid) — melainkan:
+Not "fix detached detection" (since that signal is invalid) — instead:
 
-1. **`agent-peer list`**: tandai visual sesi yang berada dalam grup nama duplikat
-   (mis. badge `dup?` di sebelah nama), diurutkan/ditandai mana yang paling baru
-   aktif dalam grup itu, supaya user bisa lihat sekilas mana yang kandidat basi
-   tanpa perlu `ps` manual.
-2. **Command baru `agent-peer stop <nama-atau-pid>`**: kirim SIGTERM ke proses
-   listener target — memicu `cleanup()` miliknya sendiri secara graceful (bukan
-   hapus file registrasi manual dari luar, supaya tetap konsisten dengan siklus
-   hidup yang sudah ada di `listener.py`). Ini pengganti resmi untuk `kill <pid>`
-   manual.
-3. **Opsional, evaluasi belakangan**: `agent-peer prune` — list semua grup nama
-   duplikat + rekomendasi mana yang basi (berdasar recency), minta konfirmasi user
-   per proses sebelum `stop`. Tidak auto-jalan tanpa approval, sesuai prinsip
-   "jangan ambil aksi destruktif tanpa konfirmasi".
+1. **`agent-peer list`**: visually mark sessions in a duplicate name group (e.g., `dup?` badge next to the name), sorted/highlighted by most recently active in the group, so users see potential stale candidates at a glance without manual `ps`.
+2. **New command `agent-peer stop <name-or-pid>`**: send SIGTERM to the target listener process — triggering its own `cleanup()` gracefully (rather than deleting registration files externally, maintaining consistency with `listener.py` lifecycle). Official replacement for manual `kill <pid>`.
+3. **Optional, evaluate later**: `agent-peer prune` — list all duplicate name groups + recommendations on stale ones (based on recency), prompt user confirmation per process before `stop`. Never auto-run without approval.
 
-## Scope perubahan (minimal)
+## Minimal Scope of Changes
 
-- `registry.py`: tambah helper untuk group-by base-name (regex `^(.*?)(-\d+)?$`
-  pada `name`) dan hitung mana yang paling recent per grup.
-- `cli.py:cmd_list`: pakai helper itu untuk badge visual.
-- `cli.py` + `listener.py` atau modul baru kecil: command `stop` yang connect ke
-  socket target lalu kirim frame `control` dengan action semacam `"shutdown"` —
-  **atau**, lebih sederhana dan tidak butuh ubah protokol: `cli.py` langsung kirim
-  `SIGTERM` via `os.kill(pid, signal.SIGTERM)` setelah resolve target lewat
-  `registry.resolve_session` (proses target sudah punya handler SIGTERM sendiri di
-  `listener.py:262-263`, jadi cukup kirim sinyal, tidak perlu frame protokol baru).
-- Tidak menyentuh `sender.py`, `inbox.py`, `protocol.py` (format frame), atau
-  socket handshake.
+- `registry.py`: add helper to group-by base-name (regex `^(.*?)(-\d+)?$` on `name`) and compute most recent per group.
+- `cli.py:cmd_list`: use helper for visual badge.
+- `cli.py` + `listener.py`: `stop` command sending `SIGTERM` via `os.kill(pid, signal.SIGTERM)` after resolving target via `registry.resolve_session`.
+- Touch no `sender.py`, `inbox.py`, `protocol.py`, or socket handshake.
 
 ## Status
 
-Rencana, belum diimplementasikan. Menunggu konfirmasi user sebelum eksekusi.
+Planned, not yet implemented. Pending user confirmation before execution.

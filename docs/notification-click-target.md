@@ -1,29 +1,20 @@
-# Fix: notifikasi klik buka Script Editor, bukan iTerm
+# Fix: Notification Click Opens Script Editor Instead of iTerm
 
-## Masalah
+## Problem
 
-Notifikasi desktop yang dipicu `listener.py` saat pesan masuk (`osascript -e
-'display notification ...'`) selalu ter-attribute ke **Script Editor.app**
-saat diklik — bukan app yang relevan (iTerm2), berapapun isi skrip AppleScript-nya.
+Desktop notifications triggered by `listener.py` upon message arrival (`osascript -e 'display notification ...'`) always get attributed to **Script Editor.app** when clicked — instead of the relevant application (iTerm2), regardless of the AppleScript script content.
 
-## Root cause
+## Root Cause
 
-Ini perilaku macOS, bukan bug di `agent-peer`: `osascript` sebagai command-line
-tool terasosiasi dengan `Script Editor.app` sebagai default AppleScript runner.
-macOS meng-attribute notifikasi apapun yang dipicu lewat `osascript` ke identitas
-itu, jadi klik selalu mengaktifkan Script Editor — gak ada cara mengubah target
-klik selama masih lewat `osascript`.
+This is standard macOS behavior, not a bug in `agent-peer`: `osascript` as a command-line tool is associated with `Script Editor.app` as its default AppleScript runner. macOS attributes any notification triggered via `osascript` to that identity, so clicking it always activates Script Editor — there is no way to alter the click target while still routing through `osascript`.
 
 ## Fix
 
-Ganti pemicu notifikasi dengan [`terminal-notifier`](https://github.com/julienXX/terminal-notifier)
-(sudah terinstall di mesin ini, `/usr/local/bin/terminal-notifier`), yang
-mendukung flag `-activate <bundle-id>` — app dengan bundle id itu yang
-diaktifkan saat notifikasi diklik, independen dari identitas pengirim.
+Replace the notification trigger with [`terminal-notifier`](https://github.com/julienXX/terminal-notifier), which supports the `-activate <bundle-id>` flag — activating the app matching that bundle ID when the notification is clicked, independent of the sender identity.
 
 `listener.py`:
 ```python
-NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"   # bundle id iTerm2
+NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"   # iTerm2 bundle ID
 
 if shutil.which("terminal-notifier"):
     subprocess.Popen([
@@ -31,34 +22,21 @@ if shutil.which("terminal-notifier"):
         "-activate", NOTIFY_ACTIVATE_BUNDLE_ID, "-sound", "Glass"
     ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 else:
-    # fallback ke osascript kalau terminal-notifier gak ada di mesin lain
+    # fallback to osascript if terminal-notifier is missing on other machines
     ...
 ```
 
-Catatan implementasi:
-- **Jangan pakai flag `-sender`** bersamaan dengan `-activate` — konflik di
-  macOS Sequoia 15.x+ dan bikin click-to-focus gak jalan (dikonfirmasi dari
-  riset komunitas).
-- Bundle id iTerm2 dikonfirmasi via `osascript -e 'id of app "iTerm"'` →
-  `com.googlecode.iterm2`.
-- Ada fallback ke `osascript` kalau `terminal-notifier` gak terinstall (dicek
-  `shutil.which` tiap kali, bukan di-cache — supaya otomatis kepakai begitu
-  di-install belakangan tanpa perlu restart listener), supaya tetap portable
-  ke mesin lain yang belum punya `terminal-notifier`.
+Implementation Notes:
+- **Do not use the `-sender` flag** alongside `-activate` — this causes conflicts on macOS Sequoia 15.x+ and breaks click-to-focus behavior (confirmed from community research).
+- iTerm2 bundle ID confirmed via `osascript -e 'id of app "iTerm"'` → `com.googlecode.iterm2`.
+- Fallback to `osascript` exists if `terminal-notifier` is not installed (checked via `shutil.which` dynamically on each call, not cached — so it automatically gets used if installed later without requiring a listener restart), ensuring portability across machines lacking `terminal-notifier`.
 
-## Gotcha yang ditemukan saat testing
+## Testing Gotcha Discovered
 
-Notifikasi sempat "berhasil terkirim" (`terminal-notifier -list ALL` nunjukin
-status "Delivered") tapi **gak muncul sebagai banner** di layar. Root cause:
-macOS butuh izin notifikasi eksplisit per-app, dan karena ini pertama kalinya
-`terminal-notifier` (identitas app terpisah dari `osascript`/Script Editor)
-ngirim notifikasi di mesin ini, izinnya belum granted secara default.
+Notifications were "successfully delivered" (`terminal-notifier -list ALL` showed "Delivered" status) but **did not appear as banners** on screen. Root cause: macOS requires explicit notification permissions per application, and because this was the first time `terminal-notifier` (an app identity distinct from `osascript`/Script Editor) sent notifications on this machine, permissions were not granted by default.
 
-**Fix manual (sekali saja, per mesin):** System Settings → Notifications →
-cari "terminal-notifier" → pastikan "Allow Notifications" nyala dan style-nya
-bukan "None".
+**Manual Fix (one-time per machine):** System Settings → Notifications → search for "terminal-notifier" → ensure "Allow Notifications" is enabled and style is not set to "None".
 
 ## Status
 
-Diimplementasikan, dites, dan dikonfirmasi user — klik notifikasi sekarang
-membuka iTerm, bukan Script Editor.
+Implemented, tested, and confirmed — clicking notifications now opens iTerm instead of Script Editor.

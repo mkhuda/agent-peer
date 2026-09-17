@@ -1,8 +1,8 @@
-# Rencana: unread cursor untuk `agent-peer wait`
+# Plan: Unread Cursor for `agent-peer wait`
 
-## Masalah
+## Problem
 
-`wait` saat ini (`inbox.py:wait_for_message`) memakai **baseline count-at-call-time**:
+`wait` currently (`inbox.py:wait_for_message`) uses **baseline count-at-call-time**:
 
 ```python
 def wait_for_message(session=None, timeout=None):
@@ -14,58 +14,39 @@ def wait_for_message(session=None, timeout=None):
         ...
 ```
 
-Dua akibat nyata dari desain ini:
+Two concrete consequences of this design:
 
-1. **Backlog hilang setelah restart.** `wait` dijalankan sebagai tool call blocking di
-   agentic loop agy. Kalau agy sedang mengerjakan task lain (bukan sedang menjalankan
-   `wait`), proses `wait` sebelumnya sudah mati (tool call sebelumnya selesai/turn
-   berganti). Pesan yang masuk selama window itu tetap tercatat di inbox file, tapi
-   begitu `wait` dipanggil ulang setelah task selesai, baseline baru dihitung dari
-   total count **termasuk** pesan yang numpuk itu — jadi `wait` tidak langsung return,
-   malah menunggu pesan berikutnya yang benar-benar baru.
-2. **Cuma return 1 pesan, sisanya hilang permanen.** Kalau beberapa pesan masuk dalam
-   satu siklus polling (100ms), `return msgs[-1]` cuma ambil yang terakhir. Baseline
-   panggilan berikutnya sudah termasuk semuanya, jadi pesan yang "terlewat" itu tidak
-   pernah bisa direplay lagi lewat `wait`.
+1. **Backlog lost after restart.** `wait` runs as a blocking tool call in agy's agentic loop. If agy is busy executing another task (not running `wait`), the previous `wait` process has exited (previous tool call finished / turn changed). Messages arriving during that window remain recorded in the inbox file, but as soon as `wait` is invoked again after the task completes, a new baseline is computed from total count **including** those accumulated messages — so `wait` does not return immediately, and instead waits for a genuinely new subsequent message.
+2. **Only returns 1 message, remaining messages lost permanently.** If multiple messages arrive within a single poll cycle (100ms), `return msgs[-1]` only returns the last one. The next call's baseline already includes all of them, so skipped messages can never be replayed via `wait`.
 
-Efek gabungan: agy kehilangan kesadaran atas pesan yang masuk saat dia sibuk
-mengerjakan task lain, dan `wait` yang dijalankan lagi setelah task selesai tidak
-otomatis "menagih" backlog itu.
+Combined effect: agy loses awareness of messages arriving while busy with another task, and `wait` re-invoked after task completion does not automatically "claim" that backlog.
 
-## Target perilaku
+## Target Behavior
 
-Agent tidak perlu melakukan aksi eksplisit "mark as read". Begitu agy memanggil
-`wait` (kapan pun, entah sedang idle atau baru selesai task lain):
+The agent does not need to perform an explicit "mark as read" action. Whenever agy invokes `wait` (at any time, whether idle or just finished another task):
 
-- Kalau ada backlog pesan yang belum pernah "dilihat" oleh sesi ini → langsung
-  `return` semuanya (merge, bukan cuma 1), **tanpa masuk mode polling/blocking**.
-- Kalau tidak ada backlog → jalan seperti sekarang: blocking poll sampai ada pesan
-  baru, lalu return.
-- Di kedua kasus, cursor otomatis maju setelah `return` — efeknya "auto flag read"
-  tanpa agent perlu tahu ada state read/unread di baliknya sama sekali.
+- If an unread message backlog exists for this session → immediately `return` all of them (merged, not just 1), **without entering polling/blocking mode**.
+- If no backlog exists → operate as before: blocking poll until a new message arrives, then return.
+- In both cases, the cursor automatically advances after `return` — effectively an "auto flag read" without the agent needing to manage read/unread state explicitly.
 
-## Desain
+## Design
 
-Cursor disimpan **per sesi**, berbasis **timestamp** (bukan line count) supaya tahan
-terhadap `agent-peer inbox --clear`:
+The cursor is stored **per session**, based on **timestamp** (not line count) to withstand `agent-peer inbox --clear`:
 
-```
-~/.agent-peer/cursors/<nama-atau-pid>.json
+```text
+~/.agent-peer/cursors/<name-or-pid>.json
 { "last_read_at": <epoch float> }
 ```
 
-Kenapa timestamp, bukan count:
-- Count rapuh kalau file inbox di-`--clear` (index reset ke 0, bisa salah baca ulang
-  pesan lama kalau file numpuk lagi dari awal).
-- Timestamp (`received_at`, sudah ada di tiap record — lihat `inbox.py:append_inbox`)
-  cukup untuk filter `received_at > last_read_at`, dan tetap konsisten walau file
-  dikosongkan.
+Why timestamp, not count:
+- Count is fragile if the inbox file is `--clear`ed (index resets to 0, risking re-reading old messages if the file builds up again from scratch).
+- Timestamp (`received_at`, already present on every record — see `inbox.py:append_inbox`) is sufficient to filter `received_at > last_read_at`, and stays consistent even if the file is cleared.
 
-Perubahan di `inbox.py`:
+Changes in `inbox.py`:
 
 ```python
 def get_unread(session=None):
-    cursor = _read_cursor(session)          # default: waktu sekarang, kalau belum ada file cursor
+    cursor = _read_cursor(session)          # default: current time, if cursor file doesn't exist
     msgs = read_inbox(session=session)
     return [m for m in msgs if m.get("received_at", 0) > cursor]
 
@@ -73,7 +54,7 @@ def wait_for_message(session=None, timeout=None):
     unread = get_unread(session)
     if unread:
         _write_cursor(session, unread[-1]["received_at"])
-        return unread                        # list, bukan 1 pesan
+        return unread                        # list, not 1 message
     t0 = time.time()
     while True:
         unread = get_unread(session)
@@ -85,75 +66,36 @@ def wait_for_message(session=None, timeout=None):
         time.sleep(0.1)
 ```
 
-Default cursor saat file belum ada: **waktu saat itu juga** (bukan 0) — supaya
-panggilan `wait` pertama kali tidak tiba-tiba me-replay seluruh histori lama sebagai
-"unread".
+Default cursor when file does not exist: **current exact time** (not 0) — so the first `wait` call does not suddenly replay all historical logs as "unread".
 
-## Perubahan API
+## API Changes
 
-- `wait_for_message` return `List[dict]` (bisa 1 atau banyak), bukan `Optional[dict]`.
-- `cli.py:cmd_wait` perlu iterasi list saat print, bukan asumsikan 1 pesan.
-- Command baru opsional: `agent-peer unread` (mirip `inbox` tapi hanya yang belum
-  ter-cursor, tanpa mengubah cursor — buat cek manual tanpa efek samping) — **belum
-  diputuskan, evaluasi kalau perlu setelah versi dasar jalan**.
+- `wait_for_message` returns `List[dict]` (1 or many), not `Optional[dict]`.
+- `cli.py:cmd_wait` iterates the list when printing, rather than assuming 1 message.
+- Optional new command: `agent-peer unread` (similar to `inbox` but only un-cursored items, without advancing cursor — for manual inspection without side effects) — **not yet decided, evaluate if needed after base version runs**.
 
-## Scope perubahan (minimal)
+## Scope of Changes (Minimal)
 
-- `inbox.py`: tambah `_read_cursor`/`_write_cursor`/`get_unread`, ubah
-  `wait_for_message`.
-- `cli.py`: `cmd_wait` handle list.
-- Tidak menyentuh `sender.py`, `listener.py`, `protocol.py`, `registry.py`, socket
-  handshake, atau format frame — murni logic sisi baca inbox.
+- `inbox.py`: add `_read_cursor`/`_write_cursor`/`get_unread`, modify `wait_for_message`.
+- `cli.py`: `cmd_wait` handles list.
+- Touch no `sender.py`, `listener.py`, `protocol.py`, `registry.py`, socket handshake, or frame format — pure inbox reading side logic.
 
 ## Status
 
-**Diimplementasikan** (`protocol.py`: `CURSORS_DIR`/`get_cursor_path`; `inbox.py`:
-`_read_cursor`/`_write_cursor`/`get_unread`/`wait_for_message` return list;
-`cli.py:cmd_wait` iterasi list). Diverifikasi dengan unit test terisolasi (`HOME`
-di-override ke scratch dir, tidak menyentuh `~/.agent-peer` produksi) dan simulasi
-memakai copy read-only inbox produksi asli (`antigravity`, 42 pesan lama) — first
-call setelah "restart" terbukti tidak replay histori lama (cursor default ke
-waktu-saat-itu-juga, bukan 0).
+**Implemented** (`protocol.py`: `CURSORS_DIR`/`get_cursor_path`; `inbox.py`: `_read_cursor`/`_write_cursor`/`get_unread`/`wait_for_message` return list; `cli.py:cmd_wait` iterates list). Verified with isolated unit tests (`HOME` overridden to scratch dir, touching no production `~/.agent-peer`) and simulation using a read-only copy of real production inbox (`antigravity`, 42 historical messages) — first call after "restart" proven not to replay old history (cursor defaults to current time, not 0).
 
-Catatan: instalasi `agent-peer` di mesin ini adalah **editable install**
-(`uv tool install --editable .` → nunjuk langsung ke repo ini), jadi perubahan
-source otomatis aktif untuk panggilan `agent-peer` berikutnya tanpa perlu
-reinstall. Proses `listen`/`wait` yang sudah berjalan sebelum edit ini tidak
-terpengaruh sampai proses itu di-restart (Python sudah load kode lama ke memory).
+Note: `agent-peer` installation on this machine is an **editable install** (`uv tool install --editable .` → pointing directly to this repo), so source changes automatically activate for subsequent `agent-peer` calls without manual reinstall. Running `listen`/`wait` processes started prior to this edit are unaffected until restarted (Python already loaded old code into memory).
 
-**Settle window (delay sebelum return, untuk merge burst pesan) dipertimbangkan
-tapi diputuskan TIDAK ditambahkan** — pola pemakaian user tidak melibatkan burst
-kirim pesan sub-detik, dan backlog-merge yang sudah ada (`get_unread` selalu
-ambil semua pesan dari cursor ke titik saat itu dalam satu snapshot) sudah cukup
-untuk skenario utama (numpuk selagi sibuk kerja). Delay tambahan cuma akan
-menambah latency wakeup tanpa manfaat nyata di kasus ini.
+**Settle window (delay before return, to merge burst messages) considered but decided AGAINST** — user usage pattern does not involve sub-second message bursts, and existing backlog-merge (`get_unread` takes all messages from cursor to current point in a single snapshot) is sufficient for the primary scenario (accumulating while busy working). Additional delay would only increase wakeup latency without real benefit in this case.
 
-## Susulan: concurrent `wait` lock
+## Follow-up: Concurrent `wait` Lock
 
-Ditemukan lewat test live: harness agy bisa men-spawn `agent-peer wait` baru
-tanpa menutup invocation lama untuk sesi yang sama (dikonfirmasi lewat `ps` —
-2 proses `wait --name antigravity-test` hidup bersamaan, PPID sama, TTY beda).
-Ini race condition nyata: kedua proses baca cursor yang sama, berpotensi
-sama-sama menangkap & mengembalikan pesan yang sama (duplikat delivery, bukan
-data hilang).
+Discovered via live testing: the agy harness can spawn a new `agent-peer wait` without closing the old invocation for the same session (confirmed via `ps` — 2 `wait --name antigravity-test` processes alive simultaneously, same PPID, different TTY). This is a real race condition: both processes read the same cursor, potentially both catching & returning the same message (duplicate delivery, not lost data).
 
-**Fix:** `cmd_wait` (`cli.py`) sekarang mengambil exclusive lock non-blocking
-(`fcntl.flock`, `LOCK_EX | LOCK_NB`) di `~/.agent-peer/locks/<sesi>.lock`
-sebelum mulai polling. Kalau lock sudah dipegang proses `wait` lain untuk sesi
-yang sama → gagal cepat (`exit 1`, pesan jelas ke stderr), bukan ikut polling
-diam-diam. Lock per-sesi (nama beda tidak saling blokir), dan otomatis lepas
-oleh OS saat proses exit/crash/`kill` — tidak menambah risiko stale-file baru.
+**Fix:** `cmd_wait` (`cli.py`) now acquires a non-blocking exclusive lock (`fcntl.flock`, `LOCK_EX | LOCK_NB`) on `~/.agent-peer/locks/<session>.lock` before beginning polling. If the lock is already held by another `wait` process for the same session → fail fast (`exit 1`, clear message to stderr), rather than silently polling in parallel. Per-session lock (different names do not block each other), and automatically released by the OS when process exits/crashes/`kill`ed — adds no new stale-file risk.
 
-Diverifikasi: proses B ditolak instan saat proses A masih hidup, proses A tidak
-terganggu, lock lepas otomatis setelah A mati (termasuk lewat `kill`, bukan
-cuma exit normal) sehingga proses C berikutnya bisa jalan lagi, dan sesi dengan
-nama berbeda tidak saling memblokir.
+Verified: process B is rejected instantly while process A is alive, process A is undisturbed, lock releases automatically after A dies (including via `kill`, not just normal exit) so subsequent process C can run again, and sessions with different names do not block each other.
 
-## Temuan terkait (bukan bagian dari rencana ini, dicatat karena ditemukan saat riset)
+## Related Findings (Not Part of This Plan, Recorded From Research)
 
-`agent-peer list` bisa menampilkan sesi listener yang secara UI sudah "ditutup"
-tapi masih ALIVE=yes. Analisis lengkap + rencana fix dipindah ke
-[`docs/stale-listener-detection.md`](./stale-listener-detection.md) — ringkasnya:
-bukan PID-reuse, prosesnya memang belum benar-benar mati (verified via
-`procStart` cocok `ps lstart`), cuma tidak pernah menerima sinyal yang memicu
-`cleanup()`-nya sendiri. Fix manual sementara: `kill <pid>`.
+`agent-peer list` can display listener sessions that were "closed" in the UI but remain ALIVE=yes. Full analysis + fix plan moved to [`docs/stale-listener-detection.md`](./stale-listener-detection.md) — in short: not PID-reuse, process is genuinely alive (verified via `procStart` matching `ps lstart`), just never received a signal triggering its `cleanup()`. Temporary manual fix: `kill <pid>`.
