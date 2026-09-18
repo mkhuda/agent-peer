@@ -187,7 +187,8 @@ def cmd_wait(args):
         if msgs:
             for msg in msgs:
                 from_label = msg.get("from", "unknown")
-                print(f"📬 [NEW MESSAGE from {from_label}]: {msg.get('content')}")
+                cwd_suffix = f" ({msg['from_cwd']})" if msg.get("from_cwd") else ""
+                print(f"📬 [NEW MESSAGE from {from_label}{cwd_suffix}]: {msg.get('content')}")
             _reset_status_idle(session)
             sys.exit(0)
         else:

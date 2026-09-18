@@ -29,9 +29,13 @@ def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name
     if not shutil.which("codex"):
         raise RuntimeError("Target is a Codex session with a registered thread, but the 'codex' binary is not on PATH.")
 
+    # codex queue only carries plain text - no structured 'from'/'from_cwd'
+    # fields exist for it, so the sender label has to live in the text itself.
+    wire_content = _with_sender_header(content, from_name, from_cwd)
+
     t0 = time.time()
     result = subprocess.run(
-        ["codex", "queue", "--thread", thread_id, "--message", f"[from {from_name}] {content}"],
+        ["codex", "queue", "--thread", thread_id, "--message", wire_content],
         capture_output=True, text=True, timeout=10
     )
     if result.returncode != 0:
@@ -52,7 +56,7 @@ def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name
             "recipient_pid": to_pid,
             "priority": priority,
             "type": "user",
-            "content": content,
+            "content": wire_content,
             "raw": {"transport": "codex-queue", "thread_id": thread_id}
         },
         session_name=to_name,
