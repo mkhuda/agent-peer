@@ -17,6 +17,13 @@ def _resolve_sender_cwd(from_name: str):
     except Exception:
         return None
 
+def _with_sender_header(content: str, from_name: str, from_cwd) -> str:
+    """A real native Claude Code recipient only ever sees 'content' - its own
+    binary renders the message without surfacing the 'from'/'from_cwd'
+    fields, so the sender label has to live inside the text itself here."""
+    header = f"[from {from_name}" + (f" · {from_cwd}]" if from_cwd else "]")
+    return f"{header}\n{content}"
+
 def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name: str, from_cwd, priority: str) -> Dict[str, Any]:
     """Deliver natively via 'codex queue', bypassing the file-based inbox entirely."""
     if not shutil.which("codex"):
@@ -80,14 +87,17 @@ def send_message(
     if session.get("agentType") == "CODEX" and codex_thread_id:
         return _send_via_codex_queue(session, codex_thread_id, content, from_name, from_cwd, priority)
 
+    is_native_claude = not session.get("managedByAgentPeer")
+    wire_content = _with_sender_header(content, from_name, from_cwd) if is_native_claude else content
+
     auth_frame = format_auth_frame(peer_token)
     user_frame = format_user_frame(
-        content=content,
+        content=wire_content,
         from_name=from_name,
         # Only include the extra field for our own listener.py-managed
         # targets - a real native Claude Code recipient parses this frame
         # with its own binary, whose schema tolerance is unverified.
-        from_cwd=from_cwd if session.get("managedByAgentPeer") else None,
+        from_cwd=from_cwd if not is_native_claude else None,
         priority=priority,
         to_name=session.get("name"),
         to_pid=session.get("pid")
@@ -108,7 +118,7 @@ def send_message(
 
     elapsed_ms = (time.time() - t0) * 1000
 
-    if not session.get("managedByAgentPeer"):
+    if is_native_claude:
         # Real native Claude Code session - its own binary receives this over
         # the socket, never our listener.py, so nothing else will log it.
         to_name = session.get("name")
@@ -123,7 +133,7 @@ def send_message(
                 "recipient_pid": to_pid,
                 "priority": priority,
                 "type": "user",
-                "content": content,
+                "content": wire_content,
                 "raw": {"transport": "uds-native-claude"}
             },
             session_name=to_name,
