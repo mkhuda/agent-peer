@@ -109,16 +109,14 @@ def format_auth_frame(token: str) -> str:
 def format_user_frame(
     content: str,
     from_name: str = "agent",
-    from_sock: str = None,
     priority: str = "now",
     to_name: str = None,
     to_pid: int = None
 ) -> str:
-    origin_from = f"uds:{from_sock}" if from_sock else from_name
     payload = {
         "type": "user",
         "priority": priority,
-        "from": origin_from,
+        "from": from_name,
         "message": {
             "content": content
         }
