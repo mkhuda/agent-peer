@@ -109,6 +109,7 @@ def format_auth_frame(token: str) -> str:
 def format_user_frame(
     content: str,
     from_name: str = "agent",
+    from_cwd: str = None,
     priority: str = "now",
     to_name: str = None,
     to_pid: int = None
@@ -125,4 +126,6 @@ def format_user_frame(
         payload["to"] = to_name
     if to_pid:
         payload["to_pid"] = to_pid
+    if from_cwd:
+        payload["from_cwd"] = from_cwd
     return json.dumps(payload) + "\n"

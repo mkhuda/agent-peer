@@ -184,12 +184,15 @@ def format_log_entry(record: dict, session_cache: Dict[str, Dict[str, str]], use
 
     s_badge = format_agent_badge(sender_type, use_color)
     r_badge = format_agent_badge(recip_type, use_color)
+    from_cwd = record.get("from_cwd")
 
     if use_color:
         time_str = f"{DIM}{iso}{RESET}"
         from_str = f"{BOLD}{BRIGHT_CYAN}{sender}{RESET}"
         if s_badge:
             from_str += f" {s_badge}"
+        if from_cwd:
+            from_str += f" {DIM}({from_cwd}){RESET}"
         arrow_str = f"{DIM}──►{RESET}"
         to_str = f"{BOLD}{BRIGHT_GREEN}{recipient}{RESET}"
         if r_badge:
@@ -213,6 +216,8 @@ def format_log_entry(record: dict, session_cache: Dict[str, Dict[str, str]], use
         div_bar = "━" * divider_len
         sub_div = "─" * divider_len
         from_str = f"{sender} {s_badge}".strip()
+        if from_cwd:
+            from_str += f" ({from_cwd})"
         to_str = f"{recipient} {r_badge}".strip()
         header = f" 🕒 {iso}  |  {from_str}  -->  {to_str}  |  Priority: {priority}"
         if urgency_tag:

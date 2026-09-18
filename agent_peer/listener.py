@@ -211,6 +211,7 @@ class PeerListener:
 
         record = {
             "from": from_sender,
+            "from_cwd": frame.get("from_cwd"),
             "to": to_name,
             "to_pid": to_pid,
             "recipient_name": to_name,

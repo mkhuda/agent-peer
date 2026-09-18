@@ -125,7 +125,8 @@ def cmd_inbox(args):
         sender = m.get("from", "unknown")
         prio = m.get("priority", "normal")
         content = m.get("content", "")
-        print(f"[{iso}] From: {sender} (Priority: {prio})")
+        cwd_suffix = f" (cwd: {m['from_cwd']})" if m.get("from_cwd") else ""
+        print(f"[{iso}] From: {sender}{cwd_suffix} (Priority: {prio})")
         print(f"   {content}\n")
 
 def _warn_if_unreachable(session: str):

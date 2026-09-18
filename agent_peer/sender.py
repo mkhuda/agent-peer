@@ -8,7 +8,16 @@ from .registry import resolve_session
 from .protocol import format_auth_frame, format_user_frame
 from .inbox import append_inbox
 
-def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name: str, priority: str) -> Dict[str, Any]:
+def _resolve_sender_cwd(from_name: str):
+    """Best-effort: the sender's own registered cwd, purely informational -
+    never used for addressing or session identity."""
+    try:
+        sender_session, _, _ = resolve_session(from_name)
+        return sender_session.get("cwd")
+    except Exception:
+        return None
+
+def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name: str, from_cwd, priority: str) -> Dict[str, Any]:
     """Deliver natively via 'codex queue', bypassing the file-based inbox entirely."""
     if not shutil.which("codex"):
         raise RuntimeError("Target is a Codex session with a registered thread, but the 'codex' binary is not on PATH.")
@@ -29,6 +38,7 @@ def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name
     append_inbox(
         {
             "from": from_name,
+            "from_cwd": from_cwd,
             "to": to_name,
             "to_pid": to_pid,
             "recipient_name": to_name,
@@ -64,15 +74,20 @@ def send_message(
     Send real-time peer message to target session.
     """
     session, sock_path, peer_token = resolve_session(target)
+    from_cwd = _resolve_sender_cwd(from_name)
 
     codex_thread_id = session.get("codexThreadId")
     if session.get("agentType") == "CODEX" and codex_thread_id:
-        return _send_via_codex_queue(session, codex_thread_id, content, from_name, priority)
+        return _send_via_codex_queue(session, codex_thread_id, content, from_name, from_cwd, priority)
 
     auth_frame = format_auth_frame(peer_token)
     user_frame = format_user_frame(
         content=content,
         from_name=from_name,
+        # Only include the extra field for our own listener.py-managed
+        # targets - a real native Claude Code recipient parses this frame
+        # with its own binary, whose schema tolerance is unverified.
+        from_cwd=from_cwd if session.get("managedByAgentPeer") else None,
         priority=priority,
         to_name=session.get("name"),
         to_pid=session.get("pid")
@@ -101,6 +116,7 @@ def send_message(
         append_inbox(
             {
                 "from": from_name,
+                "from_cwd": from_cwd,
                 "to": to_name,
                 "to_pid": to_pid,
                 "recipient_name": to_name,
