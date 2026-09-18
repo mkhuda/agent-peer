@@ -12,7 +12,7 @@ from .inbox import read_inbox, clear_inbox, wait_for_message
 from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
-from .protocol import get_lock_path, auto_session_name, detect_harness_identity, SESSIONS_DIR, SOCKET_DIR
+from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
 
@@ -102,10 +102,15 @@ def cmd_listen(args):
     name = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
     # Engine is detected independently of the session name, even if --name
     # was given manually, so it always reflects the real calling harness.
-    harness, _ = detect_harness_identity()
+    harness, harness_pid = detect_harness_identity()
     codex_thread_id = args.codex_thread or os.environ.get("CODEX_THREAD_ID")
+    # Prefer the harness process's own cwd (stable - it doesn't drift just
+    # because an individual tool call runs elsewhere) over this subprocess's
+    # own os.getcwd(), unless the caller gave an explicit override.
+    cwd = args.cwd or (get_harness_cwd(harness_pid) if harness_pid else None)
     listener = PeerListener(
         name=name,
+        cwd=cwd,
         agent_type=(harness.upper() if harness else None),
         codex_thread_id=codex_thread_id
     )
@@ -271,6 +276,7 @@ def main():
     p_listen = subparsers.add_parser("listen", help="Start UDS listener to receive messages from peers")
     p_listen.add_argument("--name", default=None, help="Session name to register in Claude registry (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
     p_listen.add_argument("--codex-thread", default=None, help="This Codex session's own thread UUID (default: $CODEX_THREAD_ID). When set, 'agent-peer send' to this session delivers via native 'codex queue' instead of the file-based inbox.")
+    p_listen.add_argument("--cwd", default=None, help="Working directory to register (default: the calling harness process's own cwd via lsof/procfs, not wherever this specific command happens to run - falls back to os.getcwd() if that's unavailable)")
     p_listen.set_defaults(func=cmd_listen)
 
     # inbox

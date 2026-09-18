@@ -56,6 +56,30 @@ def is_pid_alive(pid: int) -> bool:
     except (OSError, ProcessLookupError):
         return False
 
+def get_harness_cwd(pid: int):
+    """The harness process's OWN cwd (tracked by the OS), not the cwd of
+    whichever subshell/tool-call happens to invoke 'agent-peer listen' - a
+    long-running TUI's cwd never drifts just because an individual tool call
+    runs elsewhere. Returns None if unavailable (unsupported OS, no
+    permission, or the process is gone)."""
+    try:
+        proc_cwd = f"/proc/{pid}/cwd"
+        if os.path.isdir("/proc"):
+            return os.readlink(proc_cwd)
+    except OSError:
+        return None
+    try:
+        out = subprocess.check_output(
+            ["lsof", "-a", "-p", str(pid), "-d", "cwd", "-Fn"],
+            stderr=subprocess.DEVNULL
+        ).decode("utf-8")
+        for line in out.splitlines():
+            if line.startswith("n"):
+                return line[1:]
+    except Exception:
+        pass
+    return None
+
 # Generic shell/interpreter process names to skip while walking up the parent
 # chain looking for the actual harness (agy, pi, opencode, ...) that invoked us.
 _GENERIC_PROC_NAMES = {
