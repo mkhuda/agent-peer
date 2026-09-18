@@ -74,6 +74,7 @@ PID      SESSION NAME    ENGINE   STATUS   ALIVE  SOCKET        CWD
 41213    my-app-fe       Claude   idle     yes    41213.sock    ~/projects/my-app
 52901    agy-33402       AGY      idle     yes    52901.sock    ~/projects/my-app
 ```
+Filter to one project with `--cwd <substring>`, e.g. `agent-peer list --cwd my-app`.
 
 **Send a message**, by name or PID:
 ```bash

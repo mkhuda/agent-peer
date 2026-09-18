@@ -18,8 +18,14 @@ from . import __version__
 
 def cmd_list(args):
     sessions = get_active_sessions()
+
+    cwd_filter = getattr(args, "cwd", None)
+    if cwd_filter:
+        needle = os.path.expanduser(cwd_filter).rstrip("/").lower()
+        sessions = [s for s in sessions if needle in (s.get("cwd") or "").lower()]
+
     if not sessions:
-        print("No active Claude Code sessions found.")
+        print("No active Claude Code sessions found." if not cwd_filter else f"No sessions found with cwd matching '{cwd_filter}'.")
         return
 
     print(f"{'PID':<8} {'SESSION NAME':<24} {'ENGINE':<8} {'STATUS':<8} {'ALIVE':<6} {'SOCKET':<28} {'CWD'}")
@@ -245,6 +251,7 @@ def main():
 
     # list
     p_list = subparsers.add_parser("list", help="List all active Claude Code / Agent sessions")
+    p_list.add_argument("--cwd", default=None, help="Only show sessions whose working directory contains this substring (e.g. a project folder name)")
     p_list.set_defaults(func=cmd_list)
 
     # prune
