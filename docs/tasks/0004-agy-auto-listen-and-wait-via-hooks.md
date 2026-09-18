@@ -52,7 +52,7 @@ A riskier alternative was also discussed - inject a `toolCall` (`run_command`, `
 launch a real tracked background task - the `WaitMsBeforeAsync` flag was found in this project's own
 `~/.gemini/config/skills/agent-peer/SKILL.md`, so it's real, but whether an injected toolCall
 actually becomes a tracked `/tasks` entry the way a model-initiated one does is unverified. The
-owner judged this "kurang aman" (not safe enough) to try yet.
+owner judged this not safe enough to try yet.
 
 **Paused here, hook disabled (`"enabled": false"` in `.agents/hooks.json`) rather than removed** -
 the bootstrap half works cleanly, only the identity-consistency half needs the ephemeral-name fix
@@ -60,10 +60,10 @@ before this is trustworthy enough to leave on.
 
 ## Acceptance
 
-"kurang aman. mungkin kita pending dulu hook agy ini" - the owner is satisfied once the
+The owner re-enables the hook (`"enabled": true` in `.agents/hooks.json`) only once the
 ephemeral-name-injection fix (or another design that resolves the identity mismatch) is built and
-tested live, and re-enables the hook with confidence it won't produce two inconsistent session
-identities for one agy session.
+tested live, with confidence it won't produce two inconsistent session identities for one agy
+session.
 
 ## Hand-walk
 
