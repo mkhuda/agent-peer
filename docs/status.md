@@ -96,6 +96,21 @@ live.
   like automated polling against an endpoint not meant for it. A failed call
   falls back to the cached number instead of retrying (see
   `live_5h_fetch_error`).
+
+  **Known limitation — multiple agy accounts on one machine.** The Keychain
+  lookup is a single entry keyed by service (`gemini`) + account
+  (`antigravity`), not per Google account. If you've used `agyswap` to switch
+  accounts and an old session under the *previous* account is still open (agy
+  doesn't swap accounts as seamlessly as `claude-swap` does), that old
+  session's token can still be the one sitting in - or getting rewritten back
+  into - that shared Keychain entry. `agent-peer status` then reports the
+  wrong account's quota entirely (confirmed live: it showed the *other*
+  account's 5h quota, ~17% remaining, while the actual active account's own
+  `/usage` and statusline both correctly showed ~80%). There's no way to
+  disambiguate from the API response itself - it carries no account/email
+  identifier to cross-check against. If a live number looks implausible right
+  after an `agyswap`, close the old account's agy session first, or trust
+  agy's own `/usage` instead until you do.
 - **Weekly quota + context window** — no API exists for these at all (checked:
   `fetchAvailableModels`'s response carries no weekly figure, and context
   usage is purely local state agy itself tracks). These come from

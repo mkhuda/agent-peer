@@ -9,6 +9,37 @@ from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
 PID_JSON_RE = re.compile(r"^(\d+)\.json$")
 KEY_FILE_RE = re.compile(r"^(\d+)\.[0-9a-f]{64}\.key$")
 
+# agy's own statusline.sh writes agent_state ("idle"/"working") into
+# agy_status.json on every render - much fresher than that, and it's a stale
+# snapshot of whichever agy session last rendered, not necessarily this one.
+_AGY_LIVE_STATUS_MAX_AGE_S = 90
+_AGY_STATE_TO_STATUS = {"working": "busy", "idle": "idle"}
+
+
+def _apply_agy_live_status(sessions: List[Dict]) -> None:
+    try:
+        from .agy_status import read_agy_status
+        payload, age_seconds, error = read_agy_status()
+    except Exception:
+        return
+    if error or not payload or age_seconds is None or age_seconds > _AGY_LIVE_STATUS_MAX_AGE_S:
+        return
+
+    live_status = _AGY_STATE_TO_STATUS.get(payload.get("agent_state"))
+    if not live_status:
+        return
+
+    cwd = payload.get("cwd") or (payload.get("workspace") or {}).get("current_dir")
+    if not cwd:
+        return
+
+    for s in sessions:
+        if s.get("agentType") != "AGY" or s.get("cwd") != cwd:
+            continue
+        if s.get("status") == "new-msg":
+            continue  # don't hide an unread message behind a busy/idle refresh
+        s["status"] = live_status
+
 def get_session_agent_type(session_data: dict) -> str:
     """Determine if session is 'AGY' (Google Antigravity) or 'Claude' (Claude Code)."""
     if session_data.get("agentType"):
@@ -69,6 +100,8 @@ def get_active_sessions() -> List[Dict]:
         data["socketExists"] = os.path.exists(sock_path)
 
         sessions.append(data)
+
+    _apply_agy_live_status(sessions)
 
     # Sort by name, then pid
     sessions.sort(key=lambda s: (s.get("name") or "", s.get("pid", 0)))

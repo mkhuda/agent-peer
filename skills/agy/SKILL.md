@@ -39,7 +39,7 @@ When a task involves peer collaboration:
    agent-peer list
    ```
 2. If your session is not yet listening, start it as a background task:
-   - Use `run_command` with `agent-peer listen` — do **not** pass `--name antigravity`. Auto-detection gives each session its own stable name tied to your actual process (e.g. `agy-<pid>`), so distinct sessions never collide or pile up under the same name.
+   - Use `run_command` with `agent-peer listen`, **leaving `--name` off entirely**. Auto-detection gives each session its own stable name tied to your actual process (e.g. `agy-<pid>`), so distinct sessions never collide or pile up under the same name.
    - This creates `/tmp/cc-socks/<pid>.sock` and registers the session in `~/.claude/sessions/`.
    - If a stale listener from a previous session is still lingering in `agent-peer list` (registered but no longer relevant), that's a separate known issue — leave it, don't try to kill other sessions' processes.
 
@@ -48,8 +48,10 @@ When a task involves peer collaboration:
 2. Write full findings, logs, and artifacts to a markdown file (e.g. `.dev/reviews/XX.md`).
 3. Send a concise summary citing the file:
    ```bash
-   agent-peer send <peer-name> "[fyi from antigravity]: Summary of findings. Detailed report written to .dev/reviews/XX.md."
+   agent-peer send <peer-name> "[fyi]: Summary of findings. Detailed report written to .dev/reviews/XX.md."
    ```
+   (`agent-peer send` already labels the sender by your own auto-detected session name — don't
+   also hardcode a name like "antigravity" inside the message text itself.)
 4. Follow the urgency prefix convention:
    - `[fyi]`: Information, review links, completed tasks (non-blocking).
    - `[change]`: Directing a new task or changing strategy.
@@ -62,5 +64,5 @@ Never run a loop polling `agent-peer inbox` or `sleep`.
 - `wait` self-tracks what you've already read per session. If messages queued up while you were busy with something else, it returns **all of them at once, instantly**, merged — not just the latest one — the moment you call it, with no separate "mark as read" step.
 - Only one `wait` may run per session at a time. If one is already running (e.g. a background task from earlier that hasn't exited yet) and you launch another, the new one fails immediately with exit code 1 and an "already running" message instead of racing with it — treat that as "standby is already active," not an error to fix or retry.
 - Do not let the session sit idle without a background watcher while in an active collaboration cycle.
-- Antigravity will automatically be woken up by the system when the command exits upon receiving a new incoming message.
+- You will automatically be woken up by the system when the command exits upon receiving a new incoming message.
 - Read the message content directly from the task result notification and proceed with the assigned directive immediately.
