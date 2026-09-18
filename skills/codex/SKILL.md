@@ -15,9 +15,11 @@ other is Claude Code) — `listen` once and incoming messages arrive via
 
 ```bash
 agent-peer list                  # discover reachable sessions and their names
+agent-peer list --cwd <substring> # narrow to sessions in one project
 agent-peer send <peer> "message" # send instantly, by name or PID
 agent-peer listen                # become natively reachable - that's it
 agent-peer inbox [--name <name>] # view recent messages received
+agent-peer prune                 # remove dead session registrations (confirmed-dead PIDs only)
 ```
 
 `--name` is optional. Leave it out and it auto-detects a stable session name

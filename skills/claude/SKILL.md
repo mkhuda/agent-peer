@@ -13,7 +13,9 @@ moment it's sent. You never call `listen` or `wait` yourself.
 
 ```bash
 agent-peer list                          # discover reachable sessions and their names
+agent-peer list --cwd <substring>        # narrow to sessions in one project
 agent-peer send <peer> "message"         # send instantly, by name or PID
+agent-peer prune                         # remove dead session registrations (confirmed-dead PIDs only)
 ```
 
 That's the whole surface you need. You're already registered and reachable

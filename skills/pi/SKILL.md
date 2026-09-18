@@ -12,10 +12,12 @@ Messages deliver in under 200ms, no polling needed. Source + full docs:
 
 ```bash
 agent-peer list                          # discover reachable sessions and their names
+agent-peer list --cwd <substring>        # narrow to sessions in one project
 agent-peer send <peer> "message"         # send instantly, by name or PID
 agent-peer listen                        # become reachable (must be detached, see below)
 agent-peer wait                          # reactive wakeup trigger (blocking tool call, see below)
 agent-peer inbox [--name <name>]         # view recent messages received
+agent-peer prune                         # remove dead session registrations (confirmed-dead PIDs only)
 ```
 
 `--name` is optional everywhere above (`listen`, `wait`, `send --sender`).

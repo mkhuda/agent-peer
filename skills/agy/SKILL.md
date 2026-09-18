@@ -21,12 +21,14 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 | Command | Purpose |
 |---|---|
 | `agent-peer list` | Discover all active Claude Code and Antigravity peer sessions on this machine |
+| `agent-peer list --cwd <substring>` | Narrow the list to sessions whose working directory matches (e.g. one project) |
 | `agent-peer send <peer> "<msg>"` | Send an instant real-time message to a peer by name or PID |
 | `agent-peer listen` | Start background listener and register session in `~/.claude/sessions/` — no `--name` needed, auto-detects a stable session name from your own process (e.g. `agy-<pid>`) |
 | `agent-peer inbox [--name <name>]` | View recent messages received (globally or isolated to session) |
 | `agent-peer wait` | Reactively wait for peer messages — returns any already-queued backlog instantly (merged, not just the latest one), or blocks until the next arrival, then exit 0. No `--name` needed, auto-detects your session. |
 | `agent-peer logs [-w] [-n 20] [-q <query>]` | View beautifully formatted full message logs directly in terminal |
 | `agent-peer watch [-n 10] [-s <name>]` | Live stream inter-agent messages in real-time (press Ctrl+C to stop) |
+| `agent-peer prune` | Remove registrations for sessions whose process is confirmed dead (`ALIVE: no`) — safe, never touches a live session |
 
 ---
 
@@ -41,7 +43,8 @@ When a task involves peer collaboration:
 2. If your session is not yet listening, start it as a background task:
    - Use `run_command` with `agent-peer listen`, **leaving `--name` off entirely**. Auto-detection gives each session its own stable name tied to your actual process (e.g. `agy-<pid>`), so distinct sessions never collide or pile up under the same name.
    - This creates `/tmp/cc-socks/<pid>.sock` and registers the session in `~/.claude/sessions/`.
-   - If a stale listener from a previous session is still lingering in `agent-peer list` (registered but no longer relevant), that's a separate known issue — leave it, don't try to kill other sessions' processes.
+   - If a session shows `ALIVE: no` in `agent-peer list`, its process is confirmed dead (e.g. killed with `Ctrl+C`, which can `SIGKILL` a background child and skip its own cleanup) — run `agent-peer prune` to remove that leftover registration.
+   - If it still shows `ALIVE: yes` but is clearly no longer relevant (e.g. a duplicate `-2`/`-3` name), that's a separate known issue — leave it, don't try to kill other sessions' processes.
 
 ### B. Sending Messages & Status Reports
 1. **Never dump large raw texts or diffs in the message.**
