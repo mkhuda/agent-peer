@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.4.0
+
+A round of real bugs found through live multi-harness use (agy in particular), plus two new
+housekeeping commands.
+
+- **Fixed: a sender's readable name was silently replaced with a raw socket path**
+  (`uds:/tmp/cc-socks/<pid>.sock`) whenever the sender itself was a registered session - the
+  common case, so most real sends hit it. Nothing downstream resolved it back to a name; the
+  recipient just saw a bare PID number. Always uses the real name now.
+- **Fixed: native Claude Code recipients never saw sender/cwd info at all.** Claude's own binary
+  renders a peer message from its content alone - it never surfaces the `from`/`from_cwd` fields
+  from the frame. A `[from <name> · <cwd>]` header is now prepended to the message text itself for
+  native Claude and `codex queue` targets, the only two paths where this info would otherwise be
+  lost; `agent-peer wait`'s own printed output (the primary way agy/pi/opencode/codex actually see
+  a new message) also picked up the same cwd info it was missing.
+- **Fixed: `agent-peer listen` registered wherever the tool call happened to run, not the
+  harness's actual home directory.** If the model `cd`'d elsewhere (or a tool call ran with an
+  explicit per-call working directory) before calling `listen`, the registration drifted with it -
+  even though the interactive session itself never moved. Now prefers the harness process's own
+  OS-tracked cwd (`lsof -d cwd` on macOS, `/proc/<pid>/cwd` on Linux), which doesn't drift just
+  because one tool call runs elsewhere. An explicit `--cwd` still wins if given.
+- `agent-peer list` now shows a live `busy`/`idle` status for agy sessions, sourced from agy's own
+  statusline cache - previously it only ever showed `idle`/`new-msg` from agent-peer's own
+  tracking, since agent-peer has no visibility into whether the model is actually "thinking."
+- New `agent-peer prune` removes registrations for sessions whose process is confirmed dead (e.g.
+  killed with `Ctrl+C`, which can `SIGKILL` a background child and skip its own cleanup) - never
+  touches a session that's still alive.
+- New `agent-peer list --cwd <substring>` narrows the list to one project on a machine running
+  many unrelated sessions.
+- Every message record now carries `from_cwd` - purely informational context shown in
+  `inbox`/`watch`/`logs`/`wait`, never used for addressing or session identity.
+- Fixed a real anti-pattern in agy's skill: it told the model not to pass `--name antigravity` by
+  literally spelling out that exact forbidden string, which likely caused it to do exactly that -
+  traced live to a stray duplicate registration. Rephrased without repeating the banned string.
+
 ## 0.3.0
 
 Adds Codex CLI as a fully-supported harness, and gives it (together with
