@@ -41,7 +41,42 @@ Recommended shape, per `agy-8664`'s proposal:
    silently start listening on a network-reachable port just because Tailscale happens to be
    installed.
 
-Open questions, not yet answered:
+---
+
+## LAN Auto-Discovery (Non-Tailscale: 2 Windows PCs + Mac on same Wi-Fi)
+
+For machines on the same local subnet without Tailscale:
+
+### 1. Transport Choice: Raw UDP Multicast / Broadcast (Stdlib Only)
+- **Selected: Raw UDP Multicast (`239.255.42.99:47890`) or Subnet Broadcast (`<subnet_bcast>:47890`).**
+  - **Zero Dependency:** 100% Python stdlib (`socket` with `AF_INET`, `SOCK_DGRAM`, `SO_BROADCAST`/multicast options). Less than 60 lines of code.
+  - **Cross-Platform:** Works natively across Windows, macOS, and Linux without platform-specific system services (Avahi/Bonjour).
+  - **Why not mDNS/DNS-SD via `python-zeroconf`:** `zeroconf` violates the zero-dependency core principle. Writing a raw binary DNS RFC 1035 parser in stdlib adds brittle complexity. For `agent-peer`, we don't need Apple AirPlay compatibility; we only need peer IP/port rendezvous.
+  - **Why not SSDP (UPnP):** Port 1900 is often aggressively blocked or inspected by Windows Defender and modern routers.
+
+### 2. Unified Node Addressing (`<node>/<session-name>`)
+LAN discovery and Tailscale coexist under the exact same abstraction:
+- Both feed into a unified in-memory **`NodeRegistry`**:
+  ```python
+  {
+      "win-pc1": {"transport": "lan", "endpoint": "192.168.1.50:47891", "last_seen": 1726671000},
+      "vps-sgp": {"transport": "tailscale", "endpoint": "100.80.20.10:47891", "last_seen": 1726671005}
+  }
+  ```
+- To send: `agent-peer send win-pc1/claude-worker "msg"` works identically whether `win-pc1` was discovered via LAN multicast or Tailscale.
+- If a node is reachable via both LAN and Tailscale, LAN is prioritized (lower latency).
+
+### 3. Security Boundary for LAN Discovery (Anti-Snoop & Anti-Injection)
+Because UDP broadcast/multicast is unencrypted at the Wi-Fi level:
+- **Signed Discovery Beacons:** Each beacon is signed using the shared `~/.claude/cluster.key` via HMAC-SHA256:
+  `{"node": "win-pc1", "port": 47891, "t": 1726671000, "nonce": "...", "sig": "<hmac>"}`
+  Rogue devices on the same Wi-Fi without the `cluster.key` cannot forge beacons or discover node names.
+- **Replay & Jitter:** Beacons carry timestamp; receivers drop packets older than 5s.
+- **Pairing Flow:** A simple CLI command `agent-peer pair --export` (shows 32-hex string) and `agent-peer pair <key>` to set up `~/.claude/cluster.key` on new machines.
+
+---
+
+## Open Questions & Resolution
 - How does `agent-peer list` discover *remote* sessions - does each node need to periodically
   announce itself, or is discovery pull-based (ask a known node "who do you have")?
 - What happens to `wait`'s cursor/backlog semantics across a network link that can drop and
