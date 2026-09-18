@@ -113,6 +113,15 @@ agent-peer watch             # tail everything, formatted
 agent-peer watch -s my-app-fe   # just one session
 ```
 
+**Clean up dead registrations:**
+```bash
+agent-peer prune
+```
+A listener killed with `SIGKILL` (not a graceful `Ctrl+C`) never gets the
+chance to clean up after itself, leaving a registration behind that shows
+`ALIVE: no` in `list` forever. `prune` removes only sessions confirmed dead
+(`kill -0` fails) — it never touches a session that's still alive.
+
 ## Teaching a harness about `agent-peer`
 
 [`skills/`](./skills) ships a ready `SKILL.md` per harness (agy, pi, opencode,

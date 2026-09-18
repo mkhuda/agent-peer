@@ -12,7 +12,7 @@ from .inbox import read_inbox, clear_inbox, wait_for_message
 from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
-from .protocol import get_lock_path, auto_session_name, detect_harness_identity, SESSIONS_DIR
+from .protocol import get_lock_path, auto_session_name, detect_harness_identity, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
 
@@ -40,6 +40,39 @@ def cmd_list(args):
             cwd = "..." + cwd[-27:]
         print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}")
     print(f"\nTotal: {len(sessions)} sessions registered in ~/.claude/sessions/")
+
+def cmd_prune(args):
+    """Remove registrations for sessions whose process is confirmed dead
+    (ALIVE: no in 'list') - e.g. a listener killed with SIGKILL never got the
+    chance to clean up after itself. Never touches a session still alive."""
+    sessions = get_active_sessions()
+    dead = [s for s in sessions if not s.get("alive")]
+    if not dead:
+        print("Nothing to prune - every registered session is alive.")
+        return
+
+    for s in dead:
+        pid = s.get("pid")
+        name = s.get("name") or "(untitled)"
+        removed = []
+        paths = [
+            os.path.join(SESSIONS_DIR, f"{pid}.json"),
+            s.get("keyFile"),
+            s.get("messagingSocketPath"),
+            os.path.join(SOCKET_DIR, f"{name}.sock"),
+        ]
+        for p in paths:
+            if not p:
+                continue
+            if os.path.exists(p) or os.path.islink(p):
+                try:
+                    os.unlink(p)
+                    removed.append(p)
+                except OSError:
+                    pass
+        print(f"🧹 Pruned '{name}' (PID {pid}, dead) - removed {len(removed)} file(s)")
+
+    print(f"\nPruned {len(dead)} dead session(s).")
 
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
@@ -212,6 +245,10 @@ def main():
     # list
     p_list = subparsers.add_parser("list", help="List all active Claude Code / Agent sessions")
     p_list.set_defaults(func=cmd_list)
+
+    # prune
+    p_prune = subparsers.add_parser("prune", help="Remove registrations for sessions whose process is confirmed dead (ALIVE: no)")
+    p_prune.set_defaults(func=cmd_prune)
 
     # send
     p_send = subparsers.add_parser("send", help="Send a real-time message to a session")
