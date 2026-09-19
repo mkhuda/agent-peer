@@ -1,0 +1,75 @@
+---
+name: agent-peer
+description: Use when collaborating with other agent sessions (Claude Code, Antigravity/agy, pi, opencode, Codex) via the agent-peer IPC mesh — sending real-time messages, receiving task directives, or waiting reactively for incoming messages.
+---
+
+`agent-peer` is a local IPC mesh connecting agent sessions on this machine
+(Claude Code, Antigravity/agy, pi, opencode, Codex CLI). Messages deliver in
+under 200ms, no polling needed. Source + full docs:
+`~/projects/agent-peer/README.md`.
+
+## Commands
+
+```bash
+agent-peer list                          # discover reachable sessions and their names
+agent-peer list --cwd <substring>        # narrow to sessions in one project
+agent-peer send <peer> "message"         # send instantly, by name or PID
+agent-peer listen                        # become reachable (see sandbox note below)
+agent-peer wait                          # reactive wakeup trigger (blocking, see below)
+agent-peer inbox [--name <name>]         # view recent messages received
+agent-peer prune                         # remove dead session registrations (confirmed-dead PIDs only)
+```
+
+`--name` is optional everywhere. Leave it out and it auto-detects a stable
+session name from your own process identity.
+
+## Sandbox: approve once, not every time
+
+`listen`/`wait` need to bind a Unix socket, run `ps`, and call `kill(pid, 0)`
+on other processes for liveness checks — muse's default sandbox
+(`--approval-mode on-request`) will prompt for each of these individually.
+To avoid repeated prompts for the rest of the session, launch with
+`--approval-mode never` or `--yolo`, or grant persistent trust for this
+project if your setup supports it.
+
+## Known sandbox limitation: `ALIVE: no` on every *other* session
+
+Confirmed live: muse's default sandbox returns `EPERM` for `kill(other_pid,
+0)` (your own PID is fine, everyone else's isn't). `agent-peer`'s liveness
+check uses exactly that syscall, so under the default sandbox `agent-peer
+list` shows `ALIVE: no` for every session except your own — **even ones that
+are genuinely alive**. This isn't a bug in `agent-peer`; it only clears up
+once the sandbox is relaxed (see above). Don't `prune` based on `ALIVE: no`
+alone while running sandboxed — you'd delete live registrations.
+
+## Becoming reachable (`agent-peer listen`)
+
+`listen` never exits on its own. If your session supports real background
+execution, run it detached and keep working. If not, detach it at the shell
+level in one call that returns immediately:
+
+```bash
+agent-peer listen > /tmp/agent-peer-listen.log 2>&1 &
+```
+
+## Reactive standby (`agent-peer wait`)
+
+Never poll `agent-peer inbox` in a sleep loop. Whenever you finish reporting
+results or are waiting on a peer/foreman for the next instruction, make
+`agent-peer wait` (no flags) your standby call:
+
+- It self-tracks what you've already read (per-session cursor). If messages
+  queued up while you were busy, it returns **all of them at once, instantly,
+  merged** — not just the latest one.
+- Don't pass a timeout, and don't wrap the call in a tool-level timeout
+  either — a killed `wait` with no message just means calling it again,
+  which is a polling loop by another name.
+- Only one `wait` may run per session at a time. A second one for the same
+  session fails immediately (exit code 1) instead of racing the first.
+
+## Sending messages
+
+- Don't dump large raw text/diffs into the message — write findings to a file
+  and send a short summary pointing at it.
+- Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
+  `[stop]` (immediate halt/blocker).

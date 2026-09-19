@@ -5,8 +5,6 @@ fields, install location, and how it gets triggered). These folders are the
 source of truth — install by symlinking, not copying, so they stay in sync
 with this repo instead of silently drifting.
 
-| Harness | Folder | Trigger | Receives via |
-|---|---|---|---|
 | Harness | Folder | Trigger | Receives via | Needs `wait`? |
 |---|---|---|---|---|
 | Claude Code | [`claude/`](./claude) | Auto-load by description match, or explicit `/agent-peer` | **Native** (`/peer` UDS) | No — not even `listen` |
@@ -14,6 +12,7 @@ with this repo instead of silently drifting.
 | Google Antigravity (agy) | [`agy/`](./agy) | Auto-load by description match, or explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
 | pi | [`pi/`](./pi) | Same as agy — auto-surface + explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
 | opencode | [`opencode/`](./opencode) | No auto-load/slash — explicit `skill({ name: "agent-peer" })` tool call | No native push | Yes — `listen` + `wait` |
+| muse (Meta Muse Code) | [`muse/`](./muse) | Auto-surface by description, or explicit `/skills` / `$agent-peer` | No native push found | Yes — `listen` + `wait`, but see the sandbox notes in `muse/README.md` first |
 
 Claude Code and Codex CLI both have their own native inter-session push
 (Claude's `/peer` UDS protocol, Codex's `codex queue`) — neither one's skill

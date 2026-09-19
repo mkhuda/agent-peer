@@ -57,6 +57,22 @@ def cmd_prune(args):
         print("Nothing to prune - every registered session is alive.")
         return
 
+    # A sandboxed caller (confirmed live under a muse sandbox) can have
+    # kill(pid, 0) return EPERM for every OTHER process, making every session
+    # look dead even when it isn't - pruning then would wipe out the whole
+    # mesh's registrations, not just genuinely stale ones.
+    if len(dead) == len(sessions) and len(sessions) > 1 and not args.force:
+        print(
+            f"⚠️  All {len(sessions)} registered sessions show ALIVE: no at once - refusing to "
+            "prune.\n"
+            "This is more likely a sandboxed environment blocking the liveness check itself "
+            "(e.g. kill(pid, 0) returning EPERM for other processes) than every session "
+            "genuinely dying simultaneously. Re-run with --force if you're sure they're really "
+            "all dead.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
     for s in dead:
         pid = s.get("pid")
         name = s.get("name") or "(untitled)"
@@ -262,6 +278,7 @@ def main():
 
     # prune
     p_prune = subparsers.add_parser("prune", help="Remove registrations for sessions whose process is confirmed dead (ALIVE: no)")
+    p_prune.add_argument("--force", action="store_true", help="Proceed even if every registered session shows ALIVE: no at once (normally refused - likely a sandboxed liveness check, not real)")
     p_prune.set_defaults(func=cmd_prune)
 
     # send
