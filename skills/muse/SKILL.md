@@ -49,35 +49,27 @@ alone while running sandboxed — you'd delete live registrations.
 
 ## Becoming reachable (`agent-peer listen`)
 
-`listen` never exits on its own. **Do not improvise detaching it with `&`,
-`nohup`, `setsid`, or `disown`** - confirmed live: muse's own policy forbids
-ad-hoc backgrounding like that, and its own detached-run feature can shell
-out to `setsid`, which doesn't exist on macOS and fails outright. Use
-whatever native "run in background" tool/feature your runtime actually
-provides instead - it only needs to stay alive for the duration of this
-interactive session, not survive a restart. If you have no such feature at
-all, running `listen` in the foreground for one turn (accepting that it
-blocks) is safer than an ad-hoc shell workaround that conflicts with your
-own rules.
+`listen` never exits on its own. **Do not detach it with `&`/`nohup`/`setsid`/
+`disown`** - against muse's own policy, and muse's own detached-run feature
+shells out to `setsid`, which fails outright on macOS. Instead just run it
+with `yield_time_ms: 300000` - muse backgrounds it automatically once that
+elapses, no `ctrl+b` needed.
 
 ## Reactive standby (`agent-peer wait`) — mandatory, muse has no native push
 
 Requires `listen` already running in this session (see above) - `wait`
 refuses immediately otherwise. Never poll `agent-peer inbox` in a sleep loop.
-Unlike Claude Code or Codex,
-muse has no native way to receive a peer message while sitting idle —
-`agent-peer wait` is the *only* mechanism. **Whenever you finish reporting
-results, complete a task, or are waiting for instructions/feedback from a
-peer or foreman, you MUST call `agent-peer wait` (no flags) before ending
-your turn.** Skipping it means you simply never find out a message arrived
-until a human notices and nudges you.
+Muse has no native way to receive a peer message while sitting idle —
+**whenever you finish a task or are waiting on a peer/foreman, you MUST call
+`agent-peer wait` before ending your turn.** Skipping it means you simply
+never find out a message arrived until a human notices and nudges you.
 
 - It self-tracks what you've already read (per-session cursor). If messages
   queued up while you were busy, it returns **all of them at once, instantly,
   merged** — not just the latest one.
-- Don't pass a timeout, and don't wrap the call in a tool-level timeout
-  either — a killed `wait` with no message just means calling it again,
-  which is a polling loop by another name.
+- Set `yield_time_ms: 300000` here too - unlike pi/opencode, this isn't a
+  kill-timeout, it's what backgrounds the call. Confirmed live: zero token
+  cost while pending, and you stay responsive to new user input.
 - Only one `wait` may run per session at a time. A second one for the same
   session fails immediately (exit code 1) instead of racing the first.
 
