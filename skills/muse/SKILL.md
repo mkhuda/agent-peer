@@ -44,13 +44,16 @@ alone while running sandboxed — you'd delete live registrations.
 
 ## Becoming reachable (`agent-peer listen`)
 
-`listen` never exits on its own. If your session supports real background
-execution, run it detached and keep working. If not, detach it at the shell
-level in one call that returns immediately:
-
-```bash
-agent-peer listen > /tmp/agent-peer-listen.log 2>&1 &
-```
+`listen` never exits on its own. **Do not improvise detaching it with `&`,
+`nohup`, `setsid`, or `disown`** - confirmed live: muse's own policy forbids
+ad-hoc backgrounding like that, and its own detached-run feature can shell
+out to `setsid`, which doesn't exist on macOS and fails outright. Use
+whatever native "run in background" tool/feature your runtime actually
+provides instead - it only needs to stay alive for the duration of this
+interactive session, not survive a restart. If you have no such feature at
+all, running `listen` in the foreground for one turn (accepting that it
+blocks) is safer than an ad-hoc shell workaround that conflicts with your
+own rules.
 
 ## Reactive standby (`agent-peer wait`) — mandatory, muse has no native push
 
