@@ -52,11 +52,15 @@ level in one call that returns immediately:
 agent-peer listen > /tmp/agent-peer-listen.log 2>&1 &
 ```
 
-## Reactive standby (`agent-peer wait`)
+## Reactive standby (`agent-peer wait`) — mandatory, muse has no native push
 
-Never poll `agent-peer inbox` in a sleep loop. Whenever you finish reporting
-results or are waiting on a peer/foreman for the next instruction, make
-`agent-peer wait` (no flags) your standby call:
+Never poll `agent-peer inbox` in a sleep loop. Unlike Claude Code or Codex,
+muse has no native way to receive a peer message while sitting idle —
+`agent-peer wait` is the *only* mechanism. **Whenever you finish reporting
+results, complete a task, or are waiting for instructions/feedback from a
+peer or foreman, you MUST call `agent-peer wait` (no flags) before ending
+your turn.** Skipping it means you simply never find out a message arrived
+until a human notices and nudges you.
 
 - It self-tracks what you've already read (per-session cursor). If messages
   queued up while you were busy, it returns **all of them at once, instantly,
