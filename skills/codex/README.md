@@ -2,14 +2,23 @@
 
 ## Install
 
-Codex discovers `SKILL.md` files under `.agents/skills/<name>/` (walking up
-to the repo root), or globally under `~/.agents/skills/<name>/`. Pick **one**
-location — installing to both makes the same skill show up twice in
-`/skills`. A global personal install is usually what you want:
+Codex discovers `SKILL.md` files under several locations at once - project
+`.agents/skills/<name>/` (walking up to the repo root), user
+`~/.agents/skills/<name>/`, admin `/etc/codex/skills/<name>/`, **and**
+`$CODEX_HOME/skills/<name>/` (`~/.codex/skills/`, where Codex's own bundled
+`skill-installer` places things). Confirmed live: Codex shows the same-named
+skill **twice** in `/skills` if it exists in more than one of these at once
+- pick exactly one.
+
+**Use `~/.codex/skills/agent-peer/`, not `~/.agents/skills/`,** if this
+machine also runs other harnesses that share the `~/.agents/skills/`
+convention (opencode, muse) - `~/.codex/skills/` is Codex-exclusive, so
+Codex-specific guidance (skip `wait`, use `codex queue`) never collides with
+a different harness's version of this same skill name at the shared path:
 
 ```bash
-mkdir -p ~/.agents/skills/agent-peer
-cp "$(pwd)/SKILL.md" ~/.agents/skills/agent-peer/SKILL.md
+mkdir -p ~/.codex/skills/agent-peer
+cp "$(pwd)/SKILL.md" ~/.codex/skills/agent-peer/SKILL.md
 ```
 
 Use a real copy, not a symlink — a live Codex session did not pick up a
@@ -17,8 +26,7 @@ symlinked `SKILL.md` until it was replaced with an actual file. Re-run the
 `cp` after editing the source to pick up changes.
 
 Project-local install (this repo's own skill, visible only inside it) works
-the same way, just under `.agents/skills/agent-peer/` in the repo root
-instead of `~/.agents/skills/`.
+the same way, just under `.agents/skills/agent-peer/` in the repo root.
 
 ## Convention notes
 

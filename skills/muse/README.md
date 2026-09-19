@@ -17,6 +17,14 @@ Confirmed live: `muse skills validate` reports profile
 `muse skills install`; no project-level skills convention was found in this
 repo (no `.muse/` directory).
 
+**`~/.agents/skills/` is shared with other harnesses** (Codex CLI also scans
+it) - if this machine also runs Codex, install *Codex's* version at
+`~/.codex/skills/agent-peer/` instead (Codex-exclusive, see
+`skills/codex/README.md`) so the two harnesses' genuinely different guidance
+(muse must `wait`; Codex must not) never collide at the same shared path. No
+muse-exclusive alternative location is known yet - if one turns up, prefer
+it the same way.
+
 ## Convention notes
 
 (Verified live against a real muse session - `muse-test`, 2026-09-20, full
