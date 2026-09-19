@@ -9,9 +9,8 @@ from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
 PID_JSON_RE = re.compile(r"^(\d+)\.json$")
 KEY_FILE_RE = re.compile(r"^(\d+)\.[0-9a-f]{64}\.key$")
 
-# agy's own statusline.sh writes agent_state ("idle"/"working") into
-# agy_status.json on every render - much fresher than that, and it's a stale
-# snapshot of whichever agy session last rendered, not necessarily this one.
+# agy's statusline.sh writes agent_state into agy_status.json on each
+# render - a global snapshot of whichever agy session last rendered.
 _AGY_LIVE_STATUS_MAX_AGE_S = 90
 _AGY_STATE_TO_STATUS = {"working": "busy", "idle": "idle"}
 

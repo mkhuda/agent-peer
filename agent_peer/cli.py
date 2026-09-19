@@ -57,10 +57,8 @@ def cmd_prune(args):
         print("Nothing to prune - every registered session is alive.")
         return
 
-    # A sandboxed caller (confirmed live under a muse sandbox) can have
-    # kill(pid, 0) return EPERM for every OTHER process, making every session
-    # look dead even when it isn't - pruning then would wipe out the whole
-    # mesh's registrations, not just genuinely stale ones.
+    # A sandboxed kill(pid, 0) can EPERM for every other process, making a
+    # live session look dead - refuse rather than wipe the whole registry.
     if len(dead) == len(sessions) and len(sessions) > 1 and not args.force:
         print(
             f"⚠️  All {len(sessions)} registered sessions show ALIVE: no at once - refusing to "
@@ -120,9 +118,7 @@ def cmd_listen(args):
     # was given manually, so it always reflects the real calling harness.
     harness, harness_pid = detect_harness_identity()
     codex_thread_id = args.codex_thread or os.environ.get("CODEX_THREAD_ID")
-    # Prefer the harness process's own cwd (stable - it doesn't drift just
-    # because an individual tool call runs elsewhere) over this subprocess's
-    # own os.getcwd(), unless the caller gave an explicit override.
+    # Prefer the harness process's own stable cwd over this subprocess's own.
     cwd = args.cwd or (get_harness_cwd(harness_pid) if harness_pid else None)
     listener = PeerListener(
         name=name,
