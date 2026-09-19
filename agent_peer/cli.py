@@ -152,13 +152,16 @@ def cmd_inbox(args):
         print(f"[{iso}] From: {sender}{cwd_suffix} (Priority: {prio})")
         print(f"   {content}\n")
 
-def _warn_if_unreachable(session: str):
-    """Warn if no listener is registered for this session - 'wait' only
-    reads the inbox, it never opens a socket itself. Never auto-starts one."""
+def _refuse_if_unreachable(session: str):
+    """'wait' only reads the inbox, it never opens a socket itself - if
+    nobody ever ran 'listen' for this session, nobody could 'send' to it
+    either, so blocking is a guaranteed dead end. Refuse rather than hang
+    forever; never auto-starts a listener itself."""
     try:
         resolve_session(session)
     except Exception:
-        print(f"⚠️  No listener running for session '{session}' - you are not reachable via 'agent-peer send' right now. Run 'agent-peer listen' (detached) if you want to be. Proceeding to check for already-queued messages...", file=sys.stderr)
+        print(f"❌ No listener running for session '{session}' - nobody can reach you via 'agent-peer send' right now, so 'wait' would block forever for nothing. Run 'agent-peer listen' first.", file=sys.stderr)
+        sys.exit(1)
 
 def _reset_status_idle(session: str):
     """Best-effort: reset status back to 'idle' after wait reads a message -
@@ -182,7 +185,7 @@ def cmd_wait(args):
     # back to the merged global inbox.
     session = args.session or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
-    _warn_if_unreachable(session)
+    _refuse_if_unreachable(session)
 
     # Guard against a second concurrent 'wait' for the same session racing
     # the same cursor. Lock releases automatically on exit/crash.

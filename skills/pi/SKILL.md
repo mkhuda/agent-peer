@@ -8,6 +8,11 @@ on this machine (Claude Code, Antigravity/agy, opencode, other pi sessions).
 Messages deliver in under 200ms, no polling needed. Source + full docs:
 `~/projects/agent-peer/README.md`.
 
+**`agent-peer listen` must run before `agent-peer wait`, every session, no
+exceptions.** `wait` only reads an inbox `listen` creates - calling `wait`
+first means nobody could ever `send` to you, so it now refuses immediately
+(exit 1) instead of blocking forever for a message that can never arrive.
+
 ## Commands
 
 ```bash

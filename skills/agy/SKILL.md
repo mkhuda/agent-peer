@@ -14,6 +14,8 @@ auto-load from task-description matching.
 
 Messages are delivered in under 200ms directly to active agent sockets in `/tmp/cc-socks/` and registered in `~/.claude/sessions/`.
 
+**`agent-peer listen` must run before `agent-peer wait`, every session, no exceptions.** `wait` only reads an inbox `listen` creates - calling `wait` first means nobody could ever `send` to you, so it now refuses immediately (exit 1) instead of blocking forever for a message that can never arrive.
+
 ---
 
 ## 1. Quick Reference Commands

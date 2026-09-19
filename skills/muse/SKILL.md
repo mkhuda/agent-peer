@@ -8,6 +8,11 @@ description: Use when collaborating with other agent sessions (Claude Code, Anti
 under 200ms, no polling needed. Source + full docs:
 `~/projects/agent-peer/README.md`.
 
+**`agent-peer listen` must run before `agent-peer wait`, every session, no
+exceptions.** `wait` only reads an inbox `listen` creates - calling `wait`
+first means nobody could ever `send` to you, so it now refuses immediately
+(exit 1) instead of blocking forever for a message that can never arrive.
+
 ## Commands
 
 ```bash
@@ -57,7 +62,9 @@ own rules.
 
 ## Reactive standby (`agent-peer wait`) — mandatory, muse has no native push
 
-Never poll `agent-peer inbox` in a sleep loop. Unlike Claude Code or Codex,
+Requires `listen` already running in this session (see above) - `wait`
+refuses immediately otherwise. Never poll `agent-peer inbox` in a sleep loop.
+Unlike Claude Code or Codex,
 muse has no native way to receive a peer message while sitting idle —
 `agent-peer wait` is the *only* mechanism. **Whenever you finish reporting
 results, complete a task, or are waiting for instructions/feedback from a
