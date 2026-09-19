@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.1
+
+Adds muse (Meta Muse Code) as a supported harness, plus safety fixes found through live testing
+against it.
+
+- Ships `skills/muse/` — muse has no native inbound push, so `wait` is mandatory there like
+  agy/pi/opencode, with sandbox-specific notes (approval flags, `kill(pid, 0)` returning `EPERM`
+  for other processes, `HERDR_PANE_ID` as an identity fallback).
+- **Fixed: `agent-peer wait` blocked forever if `listen` was never run for that session first** -
+  confirmed live, a session called `wait` without registering, saw the "not reachable" warning,
+  and hung anyway waiting for a message nobody could ever send. `wait` now refuses immediately
+  (exit 1) instead. Every wait-loop skill (agy/pi/opencode/muse) now states the `listen`-before-
+  `wait` ordering as an explicit rule instead of leaving it implied.
+- **Fixed: `agent-peer prune` could wipe every session's registration at once** if the caller's own
+  sandbox made `kill(pid, 0)` return `EPERM` for every other process (confirmed live under muse) -
+  every session looked dead, and prune would have deleted all of them. Now refuses when 100% of
+  sessions appear dead simultaneously; `--force` overrides.
+- Harness auto-detection strips a versioned `<name>-bin-<version>` process name (muse's own binary
+  is literally `muse-bin-1.3.0-R3401.1`) down to the plain name, so session names and the ENGINE
+  column stay short and don't change on every version bump.
+
 ## 0.4.0
 
 A round of real bugs found through live multi-harness use (agy in particular), plus two new
