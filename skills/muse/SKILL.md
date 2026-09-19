@@ -67,9 +67,9 @@ never find out a message arrived until a human notices and nudges you.
 - It self-tracks what you've already read (per-session cursor). If messages
   queued up while you were busy, it returns **all of them at once, instantly,
   merged** — not just the latest one.
-- Set `yield_time_ms: 300000` here too - unlike pi/opencode, this isn't a
-  kill-timeout, it's what backgrounds the call. Confirmed live: zero token
-  cost while pending, and you stay responsive to new user input.
+- Set `yield_time_ms: 300000` here too - it backgrounds the call, not a
+  kill-timeout. Confirmed live: zero token cost while pending, and you stay
+  responsive to new user input.
 - Only one `wait` may run per session at a time. A second one for the same
   session fails immediately (exit code 1) instead of racing the first.
 
