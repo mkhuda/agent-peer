@@ -72,6 +72,10 @@ never find out a message arrived until a human notices and nudges you.
   responsive to new user input.
 - Only one `wait` may run per session at a time. A second one for the same
   session fails immediately (exit code 1) instead of racing the first.
+- A `wait` that returned is consumed - re-arm it (call `wait` again) each
+  time you go idle or finish a task, not just once at session start.
+- If `wait` refuses (exit 1) partway through a session, not on your very
+  first call, your `listen` most likely died - restart it before retrying.
 
 ## Sending messages
 
