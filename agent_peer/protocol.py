@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import subprocess
 import secrets
 import hashlib
@@ -94,6 +95,16 @@ def _ps_field(pid: int, field: str) -> str:
     except Exception:
         return ""
 
+# Some harness binaries embed their own build/version in the process name
+# itself (confirmed live: muse's is literally "muse-bin-1.3.0-R3401.1") -
+# strip a trailing "-bin-<version>" (or similar) so names stay short and
+# stable across version bumps, matching agy/codex/pi/opencode's plain names.
+_VERSIONED_BIN_RE = re.compile(r"^([a-z0-9]+)-bin(-.*)?$", re.IGNORECASE)
+
+def _normalize_harness_name(name: str) -> str:
+    m = _VERSIONED_BIN_RE.match(name)
+    return m.group(1).lower() if m else name
+
 def detect_harness_identity(max_depth: int = 6):
     """Walk up the parent-process chain past generic shells to find the
     calling harness. Returns (name, pid), or (None, None) if none found."""
@@ -104,7 +115,7 @@ def detect_harness_identity(max_depth: int = 6):
         comm = _ps_field(pid, "comm")
         base = os.path.basename(comm) if comm else ""
         if base and base.lower() not in _GENERIC_PROC_NAMES and not base.lower().startswith("python3."):
-            return base, pid
+            return _normalize_harness_name(base), pid
         ppid_str = _ps_field(pid, "ppid")
         if not ppid_str.isdigit():
             break
