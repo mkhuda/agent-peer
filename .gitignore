@@ -28,3 +28,5 @@ ENV/
 # meant for the published package or repo history going forward.
 docs/tasks/
 .dev/
+CLAUDE.md
+AGENTS.md
