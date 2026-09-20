@@ -77,3 +77,10 @@ meant to block, so let the call itself sit there rather than detaching it:
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
+- Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
+  delivers, then blocks in the same call until that peer replies (exit 0) or the
+  timeout lapses (exit 1) — bare flag waits indefinitely. Since pi's bash tool is
+  synchronous, just let the call sit there like you would `wait`. Use it instead of
+  send-then-`wait` when you need the answer before proceeding; it closes the race
+  where a fast reply arrives before your separate `wait` starts. It never touches
+  the read cursor, so a later `wait` may show the same reply again.

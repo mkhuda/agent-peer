@@ -68,3 +68,11 @@ Never poll `agent-peer inbox` in a sleep loop.
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
+- Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
+  delivers, then blocks in the same call until that peer replies (exit 0) or the
+  timeout lapses (exit 1) — bare flag waits indefinitely. Run it the way you'd run
+  `wait` in your setup (background execution if you have it, last call of the turn
+  if synchronous). Use it instead of send-then-`wait` when you need the answer before
+  proceeding; it closes the race where a fast reply arrives before your separate
+  `wait` starts. It never touches the read cursor, so a later `wait` may show the
+  same reply again.

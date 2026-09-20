@@ -83,3 +83,9 @@ never find out a message arrived until a human notices and nudges you.
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
+- Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
+  delivers, then blocks in the same call until that peer replies (exit 0) or the
+  timeout lapses (exit 1) — bare flag waits indefinitely. Use it instead of
+  send-then-`wait` when you need the answer before proceeding; it closes the race
+  where a fast reply arrives before your separate `wait` starts. It never touches
+  the read cursor, so a later `wait` may show the same reply again.

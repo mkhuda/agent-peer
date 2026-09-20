@@ -61,6 +61,12 @@ When a task involves peer collaboration:
    - `[fyi]`: Information, review links, completed tasks (non-blocking).
    - `[change]`: Directing a new task or changing strategy.
    - `[stop]`: Immediate halt / blocker / out-of-bounds alert.
+5. Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
+   (as a background `run_command` task, like `wait`) delivers, then that same call exits 0
+   the moment that peer replies — or exit 1 on timeout, bare flag waits indefinitely. Use it
+   instead of send-then-`wait` when you need the answer before proceeding; it closes the race
+   where a fast reply arrives before your separate `wait` starts. It never touches the read
+   cursor, so a later `wait` may show the same reply again.
 
 ### C. Mandatory Reactive Standby (`agent-peer wait`)
 Never run a loop polling `agent-peer inbox` or `sleep`.
