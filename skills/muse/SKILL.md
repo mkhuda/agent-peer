@@ -1,16 +1,16 @@
 ---
 name: agent-peer
-description: Use when collaborating with other agent sessions (Claude Code, Antigravity/agy, pi, opencode, Codex) via the agent-peer IPC mesh — sending real-time messages, receiving task directives, or waiting reactively for incoming messages.
+description: Use when collaborating with other agent sessions via the agent-peer IPC mesh — sending real-time messages or waiting reactively for incoming ones. Muse harness: run 'agent-peer listen' first, then 'agent-peer wait' is the mandatory wakeup trigger (muse has no native push delivery).
 ---
 
 `agent-peer` is a local IPC mesh connecting agent sessions on this machine
-(Claude Code, Antigravity/agy, pi, opencode, Codex CLI). Messages deliver in
-under 200ms, no polling needed. Source + full docs:
+(Claude Code, Antigravity/agy, pi, opencode, Codex CLI, and muse itself).
+Messages deliver in under 200ms, no polling needed. Source + full docs:
 `~/projects/agent-peer/README.md`.
 
 **`agent-peer listen` must run before `agent-peer wait`, every session, no
-exceptions.** `wait` only reads an inbox `listen` creates - calling `wait`
-first means nobody could ever `send` to you, so it now refuses immediately
+exceptions.** `wait` only reads an inbox `listen` creates — calling `wait`
+first means nobody could ever `send` to you, so it refuses immediately
 (exit 1) instead of blocking forever for a message that can never arrive.
 
 ## Commands
@@ -25,8 +25,8 @@ agent-peer inbox [--name <name>]         # view recent messages received
 agent-peer prune                         # remove dead session registrations (confirmed-dead PIDs only)
 ```
 
-`--name` is optional everywhere. Leave it out and it auto-detects a stable
-session name from your own process identity.
+`--name` is optional everywhere. Leave it out and it auto-detects a session
+name from your own process identity (muse sessions register as `muse-<pid>`).
 
 ## Sandbox: approve once, not every time
 
@@ -34,8 +34,7 @@ session name from your own process identity.
 on other processes for liveness checks — muse's default sandbox
 (`--approval-mode on-request`) will prompt for each of these individually.
 To avoid repeated prompts for the rest of the session, launch with
-`--approval-mode never` or `--yolo`, or grant persistent trust for this
-project if your setup supports it.
+`--approval-mode never` or `--yolo`.
 
 ## Known sandbox limitation: `ALIVE: no` on every *other* session
 
@@ -45,19 +44,20 @@ check uses exactly that syscall, so under the default sandbox `agent-peer
 list` shows `ALIVE: no` for every session except your own — **even ones that
 are genuinely alive**. This isn't a bug in `agent-peer`; it only clears up
 once the sandbox is relaxed (see above). Don't `prune` based on `ALIVE: no`
-alone while running sandboxed — you'd delete live registrations.
+alone while running sandboxed — you'd delete live registrations (`prune`
+refuses an all-dead registry unless given `--force`, precisely because of
+this sandbox).
 
 ## Becoming reachable (`agent-peer listen`)
 
-`listen` never exits on its own. **Do not detach it with `&`/`nohup`/`setsid`/
-`disown`** - against muse's own policy, and muse's own detached-run feature
-shells out to `setsid`, which fails outright on macOS. Instead just run it
-with `yield_time_ms: 300000` - muse backgrounds it automatically once that
-elapses, no `ctrl+b` needed.
+`listen` never exits on its own. **Do not detach it with `&`/`nohup`/`disown`**
+— against policy, and `setsid` doesn't exist on macOS anyway. Instead just
+run it with `yield_time_ms: 300000` — the call moves to runtime background
+automatically once that elapses and stays alive for the rest of the session.
 
 ## Reactive standby (`agent-peer wait`) — mandatory, muse has no native push
 
-Requires `listen` already running in this session (see above) - `wait`
+Requires `listen` already running in this session (see above) — `wait`
 refuses immediately otherwise. Never poll `agent-peer inbox` in a sleep loop.
 Muse has no native way to receive a peer message while sitting idle —
 **whenever you finish a task or are waiting on a peer/foreman, you MUST call
@@ -67,15 +67,15 @@ never find out a message arrived until a human notices and nudges you.
 - It self-tracks what you've already read (per-session cursor). If messages
   queued up while you were busy, it returns **all of them at once, instantly,
   merged** — not just the latest one.
-- Set `yield_time_ms: 300000` here too - it backgrounds the call, not a
+- Set `yield_time_ms: 300000` here too — it backgrounds the call, not a
   kill-timeout. Confirmed live: zero token cost while pending, and you stay
   responsive to new user input.
 - Only one `wait` may run per session at a time. A second one for the same
   session fails immediately (exit code 1) instead of racing the first.
-- A `wait` that returned is consumed - re-arm it (call `wait` again) each
+- A `wait` that returned is consumed — re-arm it (call `wait` again) each
   time you go idle or finish a task, not just once at session start.
 - If `wait` refuses (exit 1) partway through a session, not on your very
-  first call, your `listen` most likely died - restart it before retrying.
+  first call, your `listen` most likely died — restart it before retrying.
 
 ## Sending messages
 
