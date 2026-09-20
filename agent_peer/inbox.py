@@ -122,3 +122,20 @@ def wait_for_message(session: Optional[str] = None, timeout: Optional[float] = N
         if timeout is not None and (time.time() - t0) >= timeout:
             return None
         time.sleep(0.1)
+
+def wait_for_reply(session: Optional[str] = None, from_name: Optional[str] = None,
+                   after_ts: float = 0, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
+    """
+    Block until the first message in this session's inbox sent by `from_name`
+    after `after_ts` arrives. Purely observational: never touches the read
+    cursor, so a later `wait` may hand the same reply back again - no message
+    is ever marked read behind anyone's back here.
+    """
+    t0 = time.time()
+    while True:
+        for m in read_inbox(session=session):
+            if m.get("from") == from_name and m.get("received_at", 0) > after_ts:
+                return m
+        if timeout is not None and (time.time() - t0) >= timeout:
+            return None
+        time.sleep(0.1)

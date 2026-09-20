@@ -8,7 +8,7 @@ import fcntl
 from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
-from .inbox import read_inbox, clear_inbox, wait_for_message
+from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
@@ -96,6 +96,9 @@ def cmd_prune(args):
 
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
+    # Captured before delivery so a fast reply can never predate the baseline
+    # and get filtered out (the 9-second race in docs/tasks/0008).
+    sent_at = time.time()
     try:
         res = send_message(
             target=args.target,
@@ -111,6 +114,23 @@ def cmd_send(args):
     except Exception as e:
         print(f"❌ Failed to send: {e}", file=sys.stderr)
         sys.exit(1)
+
+    if args.await_reply is None:
+        return
+    # Observational only: watches the sender's own inbox for the target's
+    # reply without touching the read cursor (a later `wait` still owns that).
+    timeout = args.await_reply if args.await_reply > 0 else None
+    reply = wait_for_reply(
+        session=sender,
+        from_name=res["target_name"],
+        after_ts=sent_at,
+        timeout=timeout
+    )
+    if reply:
+        print(f"📬 [REPLY from {reply.get('from', 'unknown')}]: {reply.get('content')}")
+        sys.exit(0)
+    print(f"Timeout waiting for a reply from {res['target_name']}.")
+    sys.exit(1)
 
 def cmd_listen(args):
     name = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
@@ -286,6 +306,7 @@ def main():
     p_send.add_argument("message", help="Message text to send")
     p_send.add_argument("--priority", choices=["now", "next", "later"], default="now", help="Delivery priority (default: now)")
     p_send.add_argument("--sender", default=None, help="Sender identity name (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
+    p_send.add_argument("--await-reply", nargs="?", const=0.0, default=None, type=float, metavar="SECONDS", help="After delivering, block until the target replies (first message from them past send-time, exit 0) or the timeout lapses (exit 1). Bare flag waits indefinitely; does not consume the read cursor.")
     p_send.set_defaults(func=cmd_send)
 
     # listen
