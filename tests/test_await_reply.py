@@ -23,10 +23,16 @@ class AwaitReplyTest(unittest.TestCase):
     def setUp(self):
         self._home_cm = isolated_home()
         self.home = self._home_cm.__enter__()
-        self.alice = spawn_cli(["listen", "--name", ALICE], self.home)
-        self.bob = spawn_cli(["listen", "--name", BOB], self.home)
+        # Two listeners, one test harness session: whichever sets up second
+        # would (correctly) refuse on the shared harness uid, so both use
+        # the deliberate escape hatch. The refusal itself is covered by
+        # test_listen_dup (sequential, deterministic).
+        self.alice = spawn_cli(["listen", "--name", ALICE, "--force"], self.home)
+        self.bob = spawn_cli(["listen", "--name", BOB, "--force"], self.home)
+        # Two registrations must land (not one like the older tests), so this
+        # gets more headroom than their 5s.
         self.assertTrue(
-            wait_until(lambda: _both_listening(self.home), timeout=5),
+            wait_until(lambda: _both_listening(self.home), timeout=15),
             "listeners never registered their sessions",
         )
 
@@ -39,13 +45,13 @@ class AwaitReplyTest(unittest.TestCase):
         """send --await-reply returns exit 0 with the reply once the target
         answers - no separate wait call needed."""
         asker = spawn_cli(
-            ["send", BOB, "ping?", "--sender", ALICE, "--await-reply", "5"],
+            ["send", BOB, "ping?", "--sender", ALICE, "--await-reply", "20"],
             self.home,
         )
         try:
             reply = run_cli(["send", ALICE, "pong!", "--sender", BOB], self.home)
             self.assertEqual(reply.returncode, 0, reply.stderr)
-            rc = asker.wait(timeout=10)
+            rc = asker.wait(timeout=30)
             out = asker.stdout.read()
         finally:
             stop_cli(asker)

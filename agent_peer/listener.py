@@ -20,15 +20,18 @@ from .protocol import (
     ensure_dirs,
     get_proc_start,
     generate_peer_token,
-    generate_key_filename
+    generate_key_filename,
+    harness_session_uid
 )
 from .inbox import append_inbox, mark_session_start
 
 class PeerListener:
-    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None):
+    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False):
         self.name = name
         self.agent_type = agent_type or "AGENT"
         self.codex_thread_id = codex_thread_id
+        self.force = force
+        self.harness_uid = harness_session_uid()
         self.pid = os.getpid()
         self.cwd = cwd or os.getcwd()
         self.session_id = str(uuid.uuid4())
@@ -52,6 +55,21 @@ class PeerListener:
         # Ensure unique session name among currently active alive sessions
         from .registry import get_active_sessions
         active_sessions = get_active_sessions()
+        # Same harness session listening twice is an accident, not a new peer:
+        # refuse with the old session named instead of minting a `-2` dupe.
+        if self.harness_uid and not self.force:
+            for s in active_sessions:
+                if (s.get("alive") and s.get("pid") != self.pid
+                        and s.get("harnessSessionUid") == self.harness_uid):
+                    print(
+                        f"❌ This session is already listening as "
+                        f"'{s.get('name')}' (PID {s.get('pid')}) - not starting "
+                        f"a second listener. Stop that process first if you meant "
+                        f"to replace it, or run 'agent-peer listen --force' to "
+                        f"keep both.",
+                        file=sys.stderr,
+                    )
+                    sys.exit(1)
         alive_names = {
             (s.get("name") or "").lower(): s["pid"]
             for s in active_sessions
@@ -129,6 +147,8 @@ class PeerListener:
         }
         if self.codex_thread_id:
             session_data["codexThreadId"] = self.codex_thread_id
+        if self.harness_uid:
+            session_data["harnessSessionUid"] = self.harness_uid
         with open(self.json_path, "w", encoding="utf-8") as f:
             json.dump(session_data, f)
 

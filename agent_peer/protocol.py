@@ -4,6 +4,7 @@ import re
 import subprocess
 import secrets
 import hashlib
+from typing import Optional
 
 CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
 SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
@@ -119,6 +120,22 @@ def detect_harness_identity(max_depth: int = 6):
             break
         pid = int(ppid_str)
     return None, None
+
+def harness_session_uid() -> Optional[str]:
+    """
+    Stable id of the harness *session* hosting this process, when the
+    harness exposes one. Unlike a PID this survives across the many short
+    tool-call subprocesses of one session, so a second `listen` from the
+    same session is recognizable as a duplicate rather than a new peer.
+    Returns None where no harness session id is available (current behavior
+    is kept untouched there).
+    """
+    thread = os.environ.get("CODEX_THREAD_ID")
+    if thread:
+        return f"codex:{thread}"
+    if os.environ.get("HERDR_ENV") == "1" and os.environ.get("HERDR_PANE_ID"):
+        return f"herdr:{os.environ['HERDR_PANE_ID']}"
+    return None
 
 def auto_session_name() -> str:
     """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'."""

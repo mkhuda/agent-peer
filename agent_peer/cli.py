@@ -144,7 +144,8 @@ def cmd_listen(args):
         name=name,
         cwd=cwd,
         agent_type=(harness.upper() if harness else None),
-        codex_thread_id=codex_thread_id
+        codex_thread_id=codex_thread_id,
+        force=args.force
     )
     listener.run()
 
@@ -314,6 +315,7 @@ def main():
     p_listen.add_argument("--name", default=None, help="Session name to register in Claude registry (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
     p_listen.add_argument("--codex-thread", default=None, help="This Codex session's own thread UUID (default: $CODEX_THREAD_ID). When set, 'agent-peer send' to this session delivers via native 'codex queue' instead of the file-based inbox.")
     p_listen.add_argument("--cwd", default=None, help="Working directory to register (default: the calling harness process's own cwd via lsof/procfs, not wherever this specific command happens to run - falls back to os.getcwd() if that's unavailable)")
+    p_listen.add_argument("--force", action="store_true", help="Allow a second listener from this same harness session (default refuses, naming the already-running session instead of minting a '-2' dupe)")
     p_listen.set_defaults(func=cmd_listen)
 
     # inbox
