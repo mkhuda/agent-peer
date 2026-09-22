@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.3
+
+- New `agent-peer status` Codex provider: quota/rate-limit percentages and reset times for
+  ChatGPT-plan Codex CLI sessions, sourced live from `codex app-server` over stdio JSON-RPC (no
+  extra credentials beyond an already-logged-in Codex session). Covers every bucket the CLI itself
+  shows, including the "Luna Reserve" weekly pool.
+- New `agent-peer status --live`: a refreshing ANSI dashboard across agy/Claude/Codex quota, colored
+  bars, no new dependency. `agent-peer status` and `--json` are unchanged - `--live` is a strict
+  addition, refuses cleanly outside an interactive terminal or combined with `--json`.
+
 ## 0.4.2
 
 - New `agent-peer send <peer> "msg" --await-reply [seconds]`: after sending, blocks the same call
