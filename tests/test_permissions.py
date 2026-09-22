@@ -9,6 +9,7 @@ import unittest
 from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
 
 SESSION = "perm-test"
+SESSION_NO_BACKLOG = "perm-test-lock"
 
 
 def _mode(path):
@@ -60,11 +61,33 @@ class FilePermissionTest(unittest.TestCase):
             self.assertEqual(_mode(path), 0o600, f"{path} should be 0600")
 
     def test_lock_file_is_owner_only(self):
-        run_cli(["wait", "--name", SESSION, "--timeout", "3"], self.home)
-        matches = glob.glob(os.path.join(self.home, ".agent-peer", "locks", "*.lock"))
-        self.assertTrue(matches)
-        for path in matches:
-            self.assertEqual(_mode(path), 0o600, f"{path} should be 0600")
+        # A clean release unlinks the lock file (see compat.release_lock), so
+        # this needs a 'wait' actually blocking - a session with no backlog
+        # message, unlike SESSION (which setUp seeds so other tests' 'wait'
+        # returns immediately).
+        listener = spawn_cli(["listen", "--name", SESSION_NO_BACKLOG, "--force"], self.home)
+        try:
+            self.assertTrue(
+                wait_until(lambda: len(glob.glob(
+                    os.path.join(self.home, ".claude", "sessions", "*.json")
+                )) >= 2, timeout=5),
+                "second listener never registered",
+            )
+            waiter = spawn_cli(["wait", "--name", SESSION_NO_BACKLOG, "--timeout", "5"], self.home)
+            try:
+                self.assertTrue(
+                    wait_until(lambda: glob.glob(
+                        os.path.join(self.home, ".agent-peer", "locks", "*.lock")
+                    ), timeout=3),
+                    "wait never created a lock file",
+                )
+                matches = glob.glob(os.path.join(self.home, ".agent-peer", "locks", "*.lock"))
+                for path in matches:
+                    self.assertEqual(_mode(path), 0o600, f"{path} should be 0600")
+            finally:
+                stop_cli(waiter)
+        finally:
+            stop_cli(listener)
 
 
 if __name__ == "__main__":

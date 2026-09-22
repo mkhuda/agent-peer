@@ -81,9 +81,11 @@ def cmd_prune(args):
         paths = [
             os.path.join(SESSIONS_DIR, f"{pid}.json"),
             s.get("keyFile"),
-            s.get("messagingSocketPath"),
-            os.path.join(SOCKET_DIR, f"{name}.sock"),
         ]
+        if not compat.IS_WINDOWS:
+            # Named Pipes aren't filesystem entries - nothing to unlink, and
+            # messagingSocketPath is just a pipe id there, not a real path.
+            paths += [s.get("messagingSocketPath"), os.path.join(SOCKET_DIR, f"{name}.sock")]
         for p in paths:
             if not p:
                 continue
@@ -210,10 +212,8 @@ def cmd_wait(args):
 
     _refuse_if_unreachable(session)
 
-    # Guard against a second concurrent 'wait' for the same session racing
-    # the same cursor. A crashed holder's lock is reclaimed automatically
-    # (compat.acquire_lock checks the stored pid is still alive), same
-    # crash-safety the old fcntl.flock gave for free.
+    # Guard against a second concurrent 'wait' racing the same cursor - a
+    # crashed holder's lock is reclaimed automatically (compat.acquire_lock).
     lock_path = get_lock_path(session)
     lock_handle = compat.acquire_lock(lock_path)
     if lock_handle is None:

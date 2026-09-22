@@ -28,11 +28,8 @@ from . import compat
 
 
 def _socket_address(identifier: str) -> str:
-    """A listen/connect address for `identifier` (a pid or session name),
-    consistent for both listener and sender. POSIX: a real path under
-    SOCKET_DIR (Claude Code's own protocol path - see protocol.py). Windows:
-    a short id - compat.Listener/connect add the \\\\.\\pipe\\ prefix themselves,
-    since Named Pipes are kernel-namespaced, not filesystem paths."""
+    """Address for `identifier` (a pid or name): a SOCKET_DIR path on POSIX,
+    a short pipe id on Windows - compat.Listener/connect add the prefix."""
     if compat.IS_WINDOWS:
         return f"agent-peer-{identifier}"
     return os.path.join(SOCKET_DIR, f"{identifier}.sock")
@@ -110,11 +107,8 @@ class PeerListener:
         if not compat.IS_WINDOWS:
             os.chmod(self.sock_path, 0o600)
 
-        # 3. Create a <name>.sock symlink for convenience (e.g. /tmp/cc-socks/
-        # antigravity.sock) - POSIX only. Windows has no unprivileged symlink
-        # (needs Admin/Developer Mode - confirmed live, docs/tasks/0023) and
-        # name->address resolution already goes through the JSON registry, not
-        # this symlink, so skipping it on Windows loses nothing but convenience.
+        # 3. Create a <name>.sock symlink for convenience - POSIX only, Windows
+        # needs Admin/Dev Mode for unprivileged symlinks, and doesn't need one.
         if not compat.IS_WINDOWS:
             try:
                 if os.path.islink(self.symlink_path) or os.path.exists(self.symlink_path):
@@ -127,7 +121,7 @@ class PeerListener:
         key_data = {
             "peerToken": self.peer_token,
             "procStart": proc_start,
-            "pidDomain": "windows" if compat.IS_WINDOWS else "darwin"
+            "pidDomain": "win32" if compat.IS_WINDOWS else "darwin"
         }
         with open(self.key_path, "w", encoding="utf-8") as f:
             json.dump(key_data, f)
@@ -156,7 +150,7 @@ class PeerListener:
             ],
             "kind": "interactive",
             "entrypoint": "cli",
-            "pidDomain": "windows" if compat.IS_WINDOWS else "darwin",
+            "pidDomain": "win32" if compat.IS_WINDOWS else "darwin",
             "messagingSocketPath": self.sock_path,
             "name": self.name,
             "nameSource": "user",
