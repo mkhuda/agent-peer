@@ -125,12 +125,7 @@ def wait_for_message(session: Optional[str] = None, timeout: Optional[float] = N
 
 def wait_for_reply(session: Optional[str] = None, from_name: Optional[str] = None,
                    after_ts: float = 0, timeout: Optional[float] = None) -> Optional[Dict[str, Any]]:
-    """
-    Block until the first message in this session's inbox sent by `from_name`
-    after `after_ts` arrives. Purely observational: never touches the read
-    cursor, so a later `wait` may hand the same reply back again - no message
-    is ever marked read behind anyone's back here.
-    """
+    """Blocks for the first inbox message from `from_name` after `after_ts`; never touches the read cursor."""
     t0 = time.time()
     while True:
         for m in read_inbox(session=session):

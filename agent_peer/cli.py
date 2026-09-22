@@ -96,8 +96,7 @@ def cmd_prune(args):
 
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
-    # Captured before delivery so a fast reply can never predate the baseline
-    # and get filtered out (the 9-second race in docs/tasks/0008).
+    # Captured before delivery so a fast reply can never predate the baseline.
     sent_at = time.time()
     try:
         res = send_message(

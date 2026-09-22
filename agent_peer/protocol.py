@@ -122,14 +122,7 @@ def detect_harness_identity(max_depth: int = 6):
     return None, None
 
 def harness_session_uid() -> Optional[str]:
-    """
-    Stable id of the harness *session* hosting this process, when the
-    harness exposes one. Unlike a PID this survives across the many short
-    tool-call subprocesses of one session, so a second `listen` from the
-    same session is recognizable as a duplicate rather than a new peer.
-    Returns None where no harness session id is available (current behavior
-    is kept untouched there).
-    """
+    """Stable id of the harness session hosting this process, if the harness exposes one; else None."""
     thread = os.environ.get("CODEX_THREAD_ID")
     if thread:
         return f"codex:{thread}"
