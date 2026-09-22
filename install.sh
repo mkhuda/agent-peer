@@ -35,7 +35,11 @@ for candidate in python3 python3.13 python3.12 python3.11 python3.10; do
 done
 if [ -z "$PY" ]; then
     echo "agent-peer: needs Python 3.10+ and none was found." >&2
-    echo "Install it via your OS package manager (e.g. brew install python) or from https://www.python.org/downloads/ , then re-run this script." >&2
+    if [ "$OS" = "Darwin" ]; then
+        echo "Install it via 'brew install python' or from https://www.python.org/downloads/ , then re-run this script." >&2
+    else
+        echo "Install it via your distro's package manager (e.g. 'apt install python3') or from https://www.python.org/downloads/ , then re-run this script." >&2
+    fi
     exit 1
 fi
 
@@ -60,6 +64,21 @@ case "$INSTALLER" in
     pipx) pipx install agent-peer ;;
     pip)  "$PY" -m pip install --user agent-peer ;;
 esac
+INSTALL_STATUS=$?
+
+# Check the install command's own exit code first - it can fail outright
+# (e.g. PEP 668 "externally-managed-environment" blocks plain `pip install
+# --user` on Debian 12+/Ubuntu 23.04+) and must never be reported as the
+# unrelated "installed but not on PATH" case below.
+if [ "$INSTALL_STATUS" -ne 0 ]; then
+    echo "agent-peer: install via $INSTALLER failed (see the error above)." >&2
+    if [ "$INSTALLER" = "pip" ]; then
+        echo "If that was an 'externally-managed-environment' error (PEP 668, common on" >&2
+        echo "Debian 12+/Ubuntu 23.04+): install 'uv' or 'pipx' instead (recommended), or" >&2
+        echo "force it yourself: $PY -m pip install --user --break-system-packages agent-peer" >&2
+    fi
+    exit 1
+fi
 
 # Post-install PATH sanity check. The --user fallback lands the entrypoint
 # in ~/.local/bin which is not always on PATH - say exactly where it went
