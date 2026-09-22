@@ -102,5 +102,4 @@ def pick_harnesses(entries):
             elif key == curses.KEY_DOWN:
                 cursor = (cursor + 1) % len(entries)
 
-    curses.wrapper(_run)
-    return checked
+    return curses.wrapper(_run)

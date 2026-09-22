@@ -445,10 +445,14 @@ def main():
     p_watch.set_defaults(func=cmd_watch)
 
     args = parser.parse_args()
-    args.func(args)
-    # Background update notice: stderr only, TTY only, cache-first - never
-    # blocks a real command on network and never auto-upgrades (0022 Step 6).
-    update_check.maybe_notify(__version__)
+    try:
+        args.func(args)
+    finally:
+        # Background update notice: stderr only, TTY only, cache-first - never
+        # blocks a real command on network and never auto-upgrades (0022 Step 6).
+        # finally so it still runs on the many command paths that sys.exit()
+        # directly (send/wait/prune and others) instead of returning plainly.
+        update_check.maybe_notify(__version__)
 
 if __name__ == "__main__":
     main()
