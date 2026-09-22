@@ -33,8 +33,10 @@ handles that registration and delivery, `agent-peer` only reads/writes it.
 
 Codex has native push too (via `codex queue`, once it's run `agent-peer
 listen`) - a message to a Codex peer arrives just as immediately as to
-another Claude Code session. Antigravity, `pi`, and opencode don't have a
-native equivalent: they only receive messages while actively running
+another Claude Code session. Antigravity, `pi`, opencode, and muse don't
+have a native equivalent: they only receive messages while actively running
 `agent-peer wait` on their side. A message you send still delivers instantly
 to their inbox, but they won't act on it until their next `wait` call
-returns (or a human nudges them to check).
+returns (or a human nudges them to check). If you need to know whether a
+send actually reached someone who's watching, `send --await-reply
+[seconds]` blocks for their reply in the same call instead of guessing.
