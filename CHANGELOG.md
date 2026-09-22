@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.0
+
+Native Windows support - `agent-peer` now runs directly on Windows, no WSL needed. Every
+OS-specific call is isolated behind one new module, `agent_peer/compat.py`, and every Windows path
+was verified live against a real Windows 11 machine over SSH, the same way every other harness in
+this project has been verified rather than assumed.
+
+- **Transport**: Windows has no `socket.AF_UNIX` (confirmed absent on a real install, not just
+  "supported with caveats" as commonly assumed) - the mesh now speaks Named Pipes there via
+  `multiprocessing.connection`, using its private raw-byte I/O (`_send_bytes`/`_recv_bytes`, which
+  call `WriteFile`/`ReadFile` directly - verified against the actual CPython source, not just
+  behavior, after a reviewer initially suspected these still added framing) so the wire format
+  stays identical to POSIX's raw `AF_UNIX` bytes.
+- **Locking**: `fcntl.flock` doesn't exist on Windows at all - replaced with `O_CREAT|O_EXCL`
+  (atomic on both platforms) plus pid-tracking for crash-safety, since a plain lock file isn't
+  auto-released on crash the way `flock` was. Verified live: a killed holder's lock is correctly
+  reclaimed by the next caller.
+- **Process introspection**: `ps`-based liveness/start-time/parent-walk replaced with `ctypes`
+  calls against `kernel32` (`OpenProcess`, `GetProcessTimes`, `CreateToolhelp32Snapshot`) - no
+  `psutil` dependency. Harness auto-detection now also skips the Windows shell family
+  (`cmd`/`powershell`/`pwsh`/`conhost`) and strips a `.exe` suffix before matching.
+- **Permissions**: owner-only file/directory hardening now uses `icacls` on Windows instead of
+  `chmod`. Directories are only secured once, on first creation, not on every call - found via a
+  live latency measurement (5 message appends: 0.325s -> 0.011s, ~30x) after review flagged the
+  per-message overhead.
+- **`agent-peer setup`'s picker** works on Windows via stdlib `msvcrt` - no `windows-curses`
+  dependency added.
+- **`install.ps1`**: a PowerShell 5.1-compatible one-door installer, mirroring `install.sh`'s
+  smart-detection chain (Python 3.10+ probe, `uv`/`pipx`/`pip` fallback chain, PATH sanity check).
+- `get_harness_cwd()` (cross-process cwd resolution) deliberately does **not** attempt a Windows
+  equivalent - the only route (reading another process's PEB via undocumented
+  `NtQueryInformationProcess`) was judged too fragile to be worth it; it already degrades to `None`
+  gracefully there.
+
 ## 0.4.4
 
 - New `install.sh` + `agent-peer setup`: one-door installation. `install.sh` is a thin POSIX `sh`

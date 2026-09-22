@@ -15,6 +15,7 @@
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-3178c6" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/dependencies-zero-10b981" alt="Zero dependencies" />
+  <img src="https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-6b7280" alt="macOS, Linux, Windows" />
 </p>
 
 # agent-peer
@@ -29,10 +30,11 @@ own native inter-session delivery (`/peer` over Unix Domain Sockets, and
 `codex queue` respectively) — `agent-peer send` uses whichever one applies
 directly, so those two receive messages with no `listen`/`wait` step at all.
 Antigravity, `pi`, opencode, and muse have no native equivalent, so
-`agent-peer` gives them a shared Unix Domain Socket transport plus a blocking
-`wait` that plays the same role. Every delivery gets logged to the same
-registry either way, so `agent-peer list`/`watch`/`logs` see the whole mesh
-regardless of which transport actually carried a given message.
+`agent-peer` gives them a shared socket transport (Unix Domain Sockets on
+macOS/Linux, Named Pipes on Windows) plus a blocking `wait` that plays the
+same role. Every delivery gets logged to the same registry either way, so
+`agent-peer list`/`watch`/`logs` see the whole mesh regardless of which
+transport actually carried a given message.
 
 ## Highlights
 
@@ -48,12 +50,20 @@ regardless of which transport actually carried a given message.
   reachable and who's about to run out of budget.
 - **Zero heavy dependencies** — pure Python 3.10+, standard library only
   (the `setup` picker and `status --live` dashboard are hand-rolled on
-  `curses`/ANSI, not a TUI framework).
+  `curses`/`msvcrt`/ANSI, not a TUI framework).
+- **Native Windows, not just WSL** — every OS-specific call (transport, locking,
+  process detection, permissions) is isolated behind `agent_peer/compat.py`
+  and verified live on a real Windows machine, not assumed from docs.
 
 ## Install
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/mkhuda/agent-peer/main/install.sh | sh
+```
+
+**On native Windows** (PowerShell, no WSL needed):
+```powershell
+irm https://raw.githubusercontent.com/mkhuda/agent-peer/main/install.ps1 | iex
 ```
 
 One door: detects your platform and Python, picks whichever of `uv`/`pipx`/
@@ -166,12 +176,14 @@ verified against its own source/docs rather than assumed.
 ## Architecture
 
 **Antigravity, `pi`/oh-my-pi, opencode, and muse** go through agent-peer's
-own Unix Domain Socket transport, which mirrors the handshake Claude Code
+own socket transport (Unix Domain Sockets on macOS/Linux, Named Pipes on
+Windows via `agent_peer/compat.py`), which mirrors the handshake Claude Code
 enforces for its native sessions:
 
 1. **PID validation** — the target process must actually be running.
-2. **Start-time verification** — matches `ps -o lstart=` against the
-   registered process, so a reused PID can't impersonate an old session.
+2. **Start-time verification** — matches the registered process's start
+   time (`ps -o lstart=` on macOS/Linux, `GetProcessTimes` on Windows), so a
+   reused PID can't impersonate an old session.
 3. **Auth handshake** — first frame must be `{"type":"auth","token":"<peerToken>"}`.
 4. **Message frame** — `{"type":"user","priority":"now","from":"...","message":{"content":"..."}}`.
 
