@@ -1,6 +1,7 @@
 """Fetches Claude Code's own usage/quota from Anthropic's API using its
 OAuth token from the macOS Keychain. See docs/status.md for the rationale."""
 
+import getpass
 import hashlib
 import json
 import os
@@ -40,7 +41,7 @@ def _active_keychain_services() -> list[str]:
 
 def _read_keychain(service: str) -> dict | None:
     try:
-        user = os.environ.get("USER") or __import__("pwd").getpwuid(os.geteuid()).pw_name
+        user = os.environ.get("USER") or os.environ.get("USERNAME") or getpass.getuser()
         raw = subprocess.run(
             ["security", "find-generic-password", "-s", service, "-a", user, "-w"],
             capture_output=True, text=True, timeout=5,
