@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.4
+
+- New `install.sh` + `agent-peer setup`: one-door installation. `install.sh` is a thin POSIX `sh`
+  bootstrap - detects an existing install, checks platform/Python 3.10+/an installer (`uv` -> `pipx`
+  -> `pip --user`, first hit wins) with a clear message at whichever link is missing, then hands off
+  to `agent-peer setup`. `setup` detects which of the six supported harnesses (agy, Codex, muse, pi/
+  oh-my-pi, opencode, Claude Code) are actually present and opens a stdlib `curses` checkbox picker
+  (no new dependency) to install or remove each one's `SKILL.md` at its known path; `--all`/
+  `--harness`/`--remove`/`--list` cover non-interactive/scripted use. Skills ship inside the wheel
+  itself (`importlib.resources`, verified against a real built wheel in an isolated venv+`$HOME`) so
+  a `pip`/`uv tool` install never needs the source repo on disk.
+- New background update notice: after any command, a cache-first check (24h TTL, 2.5s timeout,
+  silent on any failure) prints one stderr-only line when a newer PyPI release exists - never stdout
+  (keeps `--json`/piped output clean), never in a non-interactive context, never auto-upgrades.
+
 ## 0.4.3
 
 - New `agent-peer status` Codex provider: quota/rate-limit percentages and reset times for
