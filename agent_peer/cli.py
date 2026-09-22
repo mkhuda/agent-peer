@@ -16,6 +16,7 @@ from .codex_status import format_codex_status, get_codex_status_dict
 from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
+from . import harness_detect, setup_tui, update_check
 
 def cmd_list(args):
     sessions = get_active_sessions()
@@ -298,6 +299,60 @@ def cmd_watch(args):
     args.follow = True
     cmd_logs(args)
 
+def cmd_setup(args):
+    """One-door skill installer: detect harnesses, pick, copy SKILL.md files."""
+    entries = harness_detect.detect_all()
+    by_id = {e["id"]: e for e in entries}
+
+    if args.list:
+        for e in entries:
+            state = e["evidence"] if e["installed"] else "not detected"
+            have = "skill installed" if e["skill_present"] else "skill missing"
+            print(f"{e['id']:10} {e['label']:22} {state} [{have}]")
+        return
+
+    if args.harness:
+        unknown = [h for h in args.harness if h not in by_id]
+        if unknown:
+            print(f"unknown harness: {', '.join(unknown)} (choose from: {', '.join(by_id)})", file=sys.stderr)
+            sys.exit(2)
+        selected = set(args.harness)
+        initial = set()
+    elif args.all:
+        selected = {e["id"] for e in entries if e["installed"]}
+        initial = set()
+    else:
+        try:
+            selected = setup_tui.pick_harnesses(entries)
+        except RuntimeError as exc:
+            print(f"agent-peer setup: {exc}", file=sys.stderr)
+            sys.exit(2)
+        initial = setup_tui._initial_checked(entries)
+
+    if args.remove:
+        targets = selected if args.harness else {e["id"] for e in entries if e["skill_present"]}
+        result = setup_tui.remove_skills(sorted(targets))
+        for hid in result["removed"]:
+            print(f"removed {hid}: {by_id[hid]['target']}")
+        for hid in result["missing"]:
+            print(f"nothing to remove for {hid}")
+        return
+
+    to_install = sorted(selected - initial) if not (args.all or args.harness) else sorted(selected)
+    to_remove = sorted((initial - selected) & {e["id"] for e in entries if e["skill_present"]})
+    if to_remove:
+        result = setup_tui.remove_skills(to_remove)
+        for hid in result["removed"]:
+            print(f"removed {hid}: {by_id[hid]['target']}")
+    if not to_install and not to_remove:
+        print("nothing to do - every selected harness already has its skill installed")
+        return
+    result = setup_tui.install_skills(to_install)
+    for hid in result["installed"]:
+        print(f"installed {hid}: {by_id[hid]['target']}")
+    for hid in result["skipped"]:
+        print(f"skipped {hid}: bundled skill not found in this install", file=sys.stderr)
+
 def main():
     parser = argparse.ArgumentParser(
         prog="agent-peer",
@@ -371,6 +426,14 @@ def main():
     p_agy_live = subparsers.add_parser("agy-live-5h", help="(internal) one-shot live 5h quota fetch, used by statusline.sh")
     p_agy_live.set_defaults(func=cmd_agy_live_5h)
 
+    # setup
+    p_setup = subparsers.add_parser("setup", help="Detect installed harnesses and install/remove their agent-peer skills")
+    p_setup.add_argument("--all", action="store_true", help="Install skills for all detected harnesses without the interactive picker")
+    p_setup.add_argument("--harness", action="append", default=[], metavar="ID", help="Install this harness's skill (repeatable; use with --remove to uninstall)")
+    p_setup.add_argument("--remove", action="store_true", help="Remove instead of install")
+    p_setup.add_argument("--list", action="store_true", help="Show detection results without changing anything")
+    p_setup.set_defaults(func=cmd_setup)
+
     # watch
     p_watch = subparsers.add_parser("watch", help="Watch incoming peer messages in real-time (live stream)")
     p_watch.add_argument("-n", "--limit", type=int, default=10, help="Number of recent messages to show (default: 10)")
@@ -383,6 +446,9 @@ def main():
 
     args = parser.parse_args()
     args.func(args)
+    # Background update notice: stderr only, TTY only, cache-first - never
+    # blocks a real command on network and never auto-upgrades (0022 Step 6).
+    update_check.maybe_notify(__version__)
 
 if __name__ == "__main__":
     main()

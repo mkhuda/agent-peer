@@ -54,3 +54,6 @@ path = "agent_peer/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["agent_peer"]
+# Bundle the per-harness skills so `agent-peer setup` can copy them from an
+# installed wheel via importlib.resources (no source checkout on disk).
+force-include = { "skills" = "agent_peer/skills" }
