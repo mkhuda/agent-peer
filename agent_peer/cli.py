@@ -255,6 +255,17 @@ def cmd_status(args):
     """Show quota/context status across every provider agent-peer bridges (agy, Claude, Codex)."""
     providers = [args.provider] if args.provider else ["agy", "claude", "codex"]
 
+    if args.live:
+        if args.json:
+            print("❌ --live and --json are mutually exclusive.", file=sys.stderr)
+            sys.exit(1)
+        if not sys.stdout.isatty():
+            print("❌ --live needs an interactive terminal. Use --json for scripts/cron instead.", file=sys.stderr)
+            sys.exit(1)
+        from .status_tui import run_live
+        run_live(providers if args.provider else None, interval=args.interval, no_color=args.no_color)
+        return
+
     if args.json:
         out = {}
         if "agy" in providers:
@@ -350,6 +361,9 @@ def main():
     p_status = subparsers.add_parser("status", help="Show quota/context status for agy, Claude Code, and/or Codex")
     p_status.add_argument("--provider", choices=["agy", "claude", "codex"], help="Limit to one provider (default: all)")
     p_status.add_argument("--json", action="store_true", help="Machine-readable JSON instead of formatted text")
+    p_status.add_argument("--live", action="store_true", help="Refreshing ANSI dashboard instead of a one-shot printout (requires a TTY)")
+    p_status.add_argument("--interval", type=float, default=20.0, help="Seconds between refreshes in --live mode (default: 20)")
+    p_status.add_argument("--no-color", action="store_true", help="Disable ANSI color codes in --live mode")
     p_status.set_defaults(func=cmd_status)
 
     # agy-live-5h: plumbing statusline.sh calls for its own throttled refresh;
