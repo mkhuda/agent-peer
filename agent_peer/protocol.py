@@ -20,11 +20,16 @@ LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 
 def ensure_dirs():
     # Only our own directories are locked down - SOCKET_DIR/SESSIONS_DIR
-    # belong to Claude Code's own protocol.
+    # belong to Claude Code's own protocol. secure_dir() only runs on first
+    # creation (icacls spawns a process on Windows - this fn is called on
+    # every message, so redoing it every time was the real hot-path cost).
     for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR):
+        existed = os.path.isdir(d)
         os.makedirs(d, exist_ok=True)
-        compat.secure_dir(d)
-    os.makedirs(SOCKET_DIR, exist_ok=True)
+        if not existed:
+            compat.secure_dir(d)
+    if not compat.IS_WINDOWS:
+        os.makedirs(SOCKET_DIR, exist_ok=True)
     os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 def get_session_inbox_path(session_id_or_name: str) -> str:

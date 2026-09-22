@@ -66,6 +66,7 @@ def _entry_line(entry, checked):
 def _pick_harnesses_windows(entries):
     import msvcrt
 
+    os.system("")  # touches the console mode, enabling ANSI on legacy conhost
     checked = _initial_checked(entries)
     cursor = 0
     sys.stdout.write("\x1b[?25l")

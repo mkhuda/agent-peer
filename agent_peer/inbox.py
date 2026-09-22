@@ -5,7 +5,14 @@ import time
 from typing import List, Dict, Any, Optional
 
 from .protocol import INBOX_FILE, get_session_inbox_path, get_cursor_path, ensure_dirs
-from .compat import secure_file as _secure
+from . import compat
+
+
+def _secure(path: str):
+    # Windows: the parent dir's (OI)(CI) ACL (compat.secure_dir, ensure_dirs)
+    # already covers new files here - skip the redundant icacls spawn per message.
+    if not compat.IS_WINDOWS:
+        compat.secure_file(path)
 
 def append_inbox(
     record: Dict[str, Any],
