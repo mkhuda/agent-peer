@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.4.2
+
+- New `agent-peer send <peer> "msg" --await-reply [seconds]`: after sending, blocks the same call
+  for the target's reply instead of needing a separate `wait`. Closes a real race found in live
+  muse usage - a reply arriving just 9 seconds after a send was still missed because `wait` wasn't
+  re-armed yet. Bare flag waits indefinitely; a timeout exits 1. Never touches the read cursor, so
+  a later `wait` still delivers the same reply.
+- **Fixed: `agent-peer listen` could register a duplicate session for the same harness session** -
+  confirmed live (Codex thread registering as both `codex-8763` and `codex-8763-2`). `listen` now
+  recognizes a second call from the same harness session (matched by Codex thread id or
+  `HERDR_PANE_ID`) and refuses, naming the already-running session, instead of minting a new one.
+  `--force` keeps the old behavior for deliberate cases.
+
 ## 0.4.1
 
 Adds muse (Meta Muse Code) as a supported harness, plus safety fixes found through live testing
