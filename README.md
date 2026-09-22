@@ -12,6 +12,7 @@
 </p>
 
 <p align="center">
+  <a href="https://pypi.org/project/agent-peer/"><img src="https://img.shields.io/pypi/v/agent-peer?color=3178c6" alt="PyPI version" /></a>
   <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-3178c6" alt="MIT license" /></a>
   <img src="https://img.shields.io/badge/python-3.10%2B-3776AB" alt="Python 3.10+" />
   <img src="https://img.shields.io/badge/dependencies-zero-10b981" alt="Zero dependencies" />
