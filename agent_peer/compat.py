@@ -161,6 +161,84 @@ else:
             kernel32.CloseHandle(handle)
 
 
+# --- Process fields for the parent-process walk (comm/ppid) and start time ---
+# POSIX: ps, unchanged. Windows: CreateToolhelp32Snapshot + GetProcessTimes.
+
+if not IS_WINDOWS:
+    def get_process_field(pid: int, field: str) -> str:
+        try:
+            out = subprocess.check_output(["ps", "-o", f"{field}=", "-p", str(pid)], stderr=subprocess.DEVNULL)
+            return out.decode("utf-8").strip()
+        except Exception:
+            return ""
+
+    def get_process_start_time(pid: int) -> str:
+        try:
+            cmd = ["ps", "-o", "lstart=", "-p", str(pid)]
+            env = dict(os.environ, LC_ALL="C", TZ="UTC")
+            res = subprocess.check_output(cmd, env=env, stderr=subprocess.DEVNULL)
+            return res.decode("utf-8").strip()
+        except Exception:
+            return ""
+else:
+    import time as _time
+
+    class _PROCESSENTRY32(ctypes.Structure):
+        _fields_ = [
+            ("dwSize", ctypes.c_uint32), ("cntUsage", ctypes.c_uint32),
+            ("th32ProcessID", ctypes.c_uint32), ("th32DefaultHeapID", ctypes.c_void_p),
+            ("th32ModuleID", ctypes.c_uint32), ("cntThreads", ctypes.c_uint32),
+            ("th32ParentProcessID", ctypes.c_uint32), ("pcPriClassBase", ctypes.c_long),
+            ("dwFlags", ctypes.c_uint32), ("szExeFile", ctypes.c_char * 260),
+        ]
+
+    class _FILETIME(ctypes.Structure):
+        _fields_ = [("dwLowDateTime", ctypes.c_uint32), ("dwHighDateTime", ctypes.c_uint32)]
+
+    _TH32CS_SNAPPROCESS = 0x00000002
+
+    def get_process_field(pid: int, field: str) -> str:
+        kernel32 = ctypes.windll.kernel32
+        snap = kernel32.CreateToolhelp32Snapshot(_TH32CS_SNAPPROCESS, 0)
+        if snap == -1:
+            return ""
+        try:
+            entry = _PROCESSENTRY32()
+            entry.dwSize = ctypes.sizeof(_PROCESSENTRY32)
+            if not kernel32.Process32First(snap, ctypes.byref(entry)):
+                return ""
+            while True:
+                if entry.th32ProcessID == pid:
+                    if field == "comm":
+                        return entry.szExeFile.decode(errors="replace")
+                    if field == "ppid":
+                        return str(entry.th32ParentProcessID)
+                    return ""
+                if not kernel32.Process32Next(snap, ctypes.byref(entry)):
+                    return ""
+        finally:
+            kernel32.CloseHandle(snap)
+
+    def get_process_start_time(pid: int) -> str:
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return ""
+        try:
+            creation, exit_t, kernel_t, user_t = _FILETIME(), _FILETIME(), _FILETIME(), _FILETIME()
+            ok = kernel32.GetProcessTimes(handle, ctypes.byref(creation), ctypes.byref(exit_t),
+                                           ctypes.byref(kernel_t), ctypes.byref(user_t))
+            if not ok:
+                return ""
+            ticks = (creation.dwHighDateTime << 32) | creation.dwLowDateTime
+            unix_ts = ticks / 10_000_000 - 11644473600  # FILETIME epoch is 1601-01-01
+            return _time.strftime("%a %b %d %H:%M:%S %Y", _time.gmtime(unix_ts))
+        except Exception:
+            return ""
+        finally:
+            kernel32.CloseHandle(handle)
+
+
 # --- File locking: O_CREAT|O_EXCL (fcntl doesn't exist on Windows) ---
 # Unlike flock, a lock FILE isn't auto-released on crash - acquire_lock stores
 # its pid and reclaims a lock whose owner is no longer alive.

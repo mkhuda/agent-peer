@@ -6,7 +6,7 @@ import secrets
 import hashlib
 from typing import Optional
 
-from .compat import is_pid_alive  # noqa: F401 - re-exported for registry.py's import
+from .compat import is_pid_alive, get_process_field, get_process_start_time as get_proc_start  # noqa: F401 - re-exported
 
 CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
 SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
@@ -43,16 +43,6 @@ def get_lock_path(session_id_or_name: str = None) -> str:
     key = str(session_id_or_name) if session_id_or_name else "_global"
     return os.path.join(LOCKS_DIR, f"{key}.lock")
 
-def get_proc_start(pid: int) -> str:
-    """Get process start time matching Claude Code's Lue() format: LC_ALL=C TZ=UTC ps -o lstart= -p <pid>"""
-    try:
-        cmd = ["ps", "-o", "lstart=", "-p", str(pid)]
-        env = dict(os.environ, LC_ALL="C", TZ="UTC")
-        res = subprocess.check_output(cmd, env=env, stderr=subprocess.DEVNULL)
-        return res.decode("utf-8").strip()
-    except Exception:
-        return ""
-
 def get_harness_cwd(pid: int):
     """The harness process's OWN cwd (tracked by the OS), not the cwd of
     whichever subshell/tool-call happens to invoke 'agent-peer listen' - a
@@ -82,14 +72,8 @@ def get_harness_cwd(pid: int):
 _GENERIC_PROC_NAMES = {
     "zsh", "bash", "sh", "dash", "tcsh", "csh", "ksh", "fish",
     "login", "env", "sudo", "su", "node", "uv", "uvx", "python", "python3",
+    "cmd", "powershell", "pwsh", "conhost", "openconsole",
 }
-
-def _ps_field(pid: int, field: str) -> str:
-    try:
-        out = subprocess.check_output(["ps", "-o", f"{field}=", "-p", str(pid)], stderr=subprocess.DEVNULL)
-        return out.decode("utf-8").strip()
-    except Exception:
-        return ""
 
 # Strips a trailing "-bin-<version>" some harness binaries embed in their
 # own process name, e.g. "muse-bin-1.3.0-R3401.1" -> "muse".
@@ -106,11 +90,13 @@ def detect_harness_identity(max_depth: int = 6):
     for _ in range(max_depth):
         if pid <= 1:
             break
-        comm = _ps_field(pid, "comm")
+        comm = get_process_field(pid, "comm")
         base = os.path.basename(comm) if comm else ""
+        if base.lower().endswith(".exe"):
+            base = base[:-4]
         if base and base.lower() not in _GENERIC_PROC_NAMES and not base.lower().startswith("python3."):
             return _normalize_harness_name(base), pid
-        ppid_str = _ps_field(pid, "ppid")
+        ppid_str = get_process_field(pid, "ppid")
         if not ppid_str.isdigit():
             break
         pid = int(ppid_str)
