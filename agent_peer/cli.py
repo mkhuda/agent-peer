@@ -3,7 +3,8 @@ import os
 import argparse
 import json
 import time
-import fcntl
+
+from . import compat
 
 from .registry import get_active_sessions, resolve_session
 from .sender import send_message
@@ -210,19 +211,20 @@ def cmd_wait(args):
     _refuse_if_unreachable(session)
 
     # Guard against a second concurrent 'wait' for the same session racing
-    # the same cursor. Lock releases automatically on exit/crash.
+    # the same cursor. A crashed holder's lock is reclaimed automatically
+    # (compat.acquire_lock checks the stored pid is still alive), same
+    # crash-safety the old fcntl.flock gave for free.
     lock_path = get_lock_path(session)
-    lock_file = open(lock_path, "w")
-    try:
-        os.chmod(lock_path, 0o600)
-    except OSError:
-        pass
-    try:
-        fcntl.flock(lock_file, fcntl.LOCK_EX | fcntl.LOCK_NB)
-    except OSError:
+    lock_handle = compat.acquire_lock(lock_path)
+    if lock_handle is None:
         label = session or "(default)"
         print(f"❌ 'agent-peer wait' for session '{label}' is already running in another process. Close the old one before starting a new one.", file=sys.stderr)
         sys.exit(1)
+    if not compat.IS_WINDOWS:
+        try:
+            os.chmod(lock_path, 0o600)
+        except OSError:
+            pass
 
     try:
         msgs = wait_for_message(session=session, timeout=timeout)
@@ -237,8 +239,7 @@ def cmd_wait(args):
             print("Timeout waiting for message.")
             sys.exit(1)
     finally:
-        fcntl.flock(lock_file, fcntl.LOCK_UN)
-        lock_file.close()
+        compat.release_lock(lock_handle)
 
 def cmd_logs(args):
     """View full detailed message logs with color formatting and live tail."""

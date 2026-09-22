@@ -1,5 +1,4 @@
 import shutil
-import socket
 import subprocess
 import time
 from typing import Dict, Any
@@ -7,6 +6,7 @@ from typing import Dict, Any
 from .registry import resolve_session
 from .protocol import format_auth_frame, format_user_frame
 from .inbox import append_inbox
+from . import compat
 
 def _resolve_sender_cwd(from_name: str):
     """Best-effort: the sender's own registered cwd, purely informational -
@@ -107,12 +107,10 @@ def send_message(
         to_pid=session.get("pid")
     )
 
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.settimeout(timeout)
-    
+    client = compat.connect(sock_path, timeout=timeout)
+
     t0 = time.time()
     try:
-        client.connect(sock_path)
         client.sendall(auth_frame.encode("utf-8"))
         time.sleep(0.04) # brief yield between frames
         client.sendall(user_frame.encode("utf-8"))

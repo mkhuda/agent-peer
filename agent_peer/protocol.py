@@ -6,6 +6,8 @@ import secrets
 import hashlib
 from typing import Optional
 
+from .compat import is_pid_alive  # noqa: F401 - re-exported for registry.py's import
+
 CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
 SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
 SOCKET_DIR = "/tmp/cc-socks"
@@ -50,13 +52,6 @@ def get_proc_start(pid: int) -> str:
         return res.decode("utf-8").strip()
     except Exception:
         return ""
-
-def is_pid_alive(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except (OSError, ProcessLookupError):
-        return False
 
 def get_harness_cwd(pid: int):
     """The harness process's OWN cwd (tracked by the OS), not the cwd of

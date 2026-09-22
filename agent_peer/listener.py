@@ -24,6 +24,18 @@ from .protocol import (
     harness_session_uid
 )
 from .inbox import append_inbox, mark_session_start
+from . import compat
+
+
+def _socket_address(identifier: str) -> str:
+    """A listen/connect address for `identifier` (a pid or session name),
+    consistent for both listener and sender. POSIX: a real path under
+    SOCKET_DIR (Claude Code's own protocol path - see protocol.py). Windows:
+    a short id - compat.Listener/connect add the \\\\.\\pipe\\ prefix themselves,
+    since Named Pipes are kernel-namespaced, not filesystem paths."""
+    if compat.IS_WINDOWS:
+        return f"agent-peer-{identifier}"
+    return os.path.join(SOCKET_DIR, f"{identifier}.sock")
 
 class PeerListener:
     def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False):
@@ -36,8 +48,8 @@ class PeerListener:
         self.cwd = cwd or os.getcwd()
         self.session_id = str(uuid.uuid4())
         self.peer_token = generate_peer_token()
-        self.sock_path = os.path.join(SOCKET_DIR, f"{self.pid}.sock")
-        self.symlink_path = os.path.join(SOCKET_DIR, f"{self.name}.sock")
+        self.sock_path = _socket_address(self.pid)
+        self.symlink_path = _socket_address(self.name)
         self.key_filename = generate_key_filename(self.pid, self.sock_path)
         
         self.json_path = os.path.join(SESSIONS_DIR, f"{self.pid}.json")
@@ -81,38 +93,46 @@ class PeerListener:
             while f"{base_name}-{idx}".lower() in alive_names:
                 idx += 1
             self.name = f"{base_name}-{idx}"
-            self.symlink_path = os.path.join(SOCKET_DIR, f"{self.name}.sock")
+            self.symlink_path = _socket_address(self.name)
 
-        # 1. Clean old socket if exists
-        if os.path.exists(self.sock_path):
+        # 1. Clean old socket if exists (POSIX only - a Named Pipe isn't a
+        # filesystem entry, nothing to unlink on Windows).
+        if not compat.IS_WINDOWS and os.path.exists(self.sock_path):
             try:
                 os.unlink(self.sock_path)
             except OSError:
                 pass
 
-        # 2. Bind Unix domain socket
-        self.server_sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.server_sock.bind(self.sock_path)
-        os.chmod(self.sock_path, 0o600)
+        # 2. Bind the transport (AF_UNIX socket on POSIX, Named Pipe on Windows).
+        self.server_sock = compat.Listener(self.sock_path)
+        self.server_sock.bind()
         self.server_sock.listen(10)
+        if not compat.IS_WINDOWS:
+            os.chmod(self.sock_path, 0o600)
 
-        # 3. Create symlink for convenience (e.g. /tmp/cc-socks/antigravity.sock)
-        try:
-            if os.path.islink(self.symlink_path) or os.path.exists(self.symlink_path):
-                os.unlink(self.symlink_path)
-            os.symlink(self.sock_path, self.symlink_path)
-        except OSError:
-            pass
+        # 3. Create a <name>.sock symlink for convenience (e.g. /tmp/cc-socks/
+        # antigravity.sock) - POSIX only. Windows has no unprivileged symlink
+        # (needs Admin/Developer Mode - confirmed live, docs/tasks/0023) and
+        # name->address resolution already goes through the JSON registry, not
+        # this symlink, so skipping it on Windows loses nothing but convenience.
+        if not compat.IS_WINDOWS:
+            try:
+                if os.path.islink(self.symlink_path) or os.path.exists(self.symlink_path):
+                    os.unlink(self.symlink_path)
+                os.symlink(self.sock_path, self.symlink_path)
+            except OSError:
+                pass
 
         # 4. Write key file
         key_data = {
             "peerToken": self.peer_token,
             "procStart": proc_start,
-            "pidDomain": "darwin"
+            "pidDomain": "windows" if compat.IS_WINDOWS else "darwin"
         }
         with open(self.key_path, "w", encoding="utf-8") as f:
             json.dump(key_data, f)
-        os.chmod(self.key_path, 0o600)
+        if not compat.IS_WINDOWS:
+            os.chmod(self.key_path, 0o600)
 
         # 5. Write session json
         session_data = {
@@ -136,7 +156,7 @@ class PeerListener:
             ],
             "kind": "interactive",
             "entrypoint": "cli",
-            "pidDomain": "darwin",
+            "pidDomain": "windows" if compat.IS_WINDOWS else "darwin",
             "messagingSocketPath": self.sock_path,
             "name": self.name,
             "nameSource": "user",
@@ -326,10 +346,10 @@ class PeerListener:
         try:
             while self.running:
                 try:
-                    client, _ = self.server_sock.accept()
+                    client = self.server_sock.accept()
                     t = threading.Thread(target=self.handle_client, args=(client,), daemon=True)
                     t.start()
-                except (OSError, socket.error):
+                except OSError:
                     break
         finally:
             self.cleanup()
