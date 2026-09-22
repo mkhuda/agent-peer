@@ -12,6 +12,7 @@ from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
+from .codex_status import format_codex_status, get_codex_status_dict
 from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
@@ -251,8 +252,8 @@ def cmd_logs(args):
     )
 
 def cmd_status(args):
-    """Show quota/context status across every provider agent-peer bridges (agy, Claude)."""
-    providers = [args.provider] if args.provider else ["agy", "claude"]
+    """Show quota/context status across every provider agent-peer bridges (agy, Claude, Codex)."""
+    providers = [args.provider] if args.provider else ["agy", "claude", "codex"]
 
     if args.json:
         out = {}
@@ -260,6 +261,8 @@ def cmd_status(args):
             out["agy"] = get_agy_status_dict()
         if "claude" in providers:
             out["claude"] = get_claude_status_dict()
+        if "codex" in providers:
+            out["codex"] = get_codex_status_dict()
         print(json.dumps(out, indent=2))
         return
 
@@ -268,6 +271,8 @@ def cmd_status(args):
         sections.append(f"── agy (Antigravity) ──────────────────────\n{format_agy_status(as_json=False)}")
     if "claude" in providers:
         sections.append(f"── claude (Claude Code) ────────────────────\n{format_claude_status(as_json=False)}")
+    if "codex" in providers:
+        sections.append(f"── codex (Codex CLI) ───────────────────────\n{format_codex_status(as_json=False)}")
     print("\n\n".join(sections))
 
 def cmd_agy_live_5h(args):
@@ -342,8 +347,8 @@ def main():
     p_logs.set_defaults(func=cmd_logs)
 
     # status
-    p_status = subparsers.add_parser("status", help="Show quota/context status for agy and/or Claude Code")
-    p_status.add_argument("--provider", choices=["agy", "claude"], help="Limit to one provider (default: both)")
+    p_status = subparsers.add_parser("status", help="Show quota/context status for agy, Claude Code, and/or Codex")
+    p_status.add_argument("--provider", choices=["agy", "claude", "codex"], help="Limit to one provider (default: all)")
     p_status.add_argument("--json", action="store_true", help="Machine-readable JSON instead of formatted text")
     p_status.set_defaults(func=cmd_status)
 
