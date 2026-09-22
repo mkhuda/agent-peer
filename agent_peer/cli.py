@@ -342,7 +342,7 @@ def cmd_setup(args):
         for hid in result["removed"]:
             print(f"removed {hid}: {by_id[hid]['target']}")
     if not to_install and not to_remove:
-        print("nothing to do - every selected harness already has its skill installed")
+        print("all set - every selected harness's skill is already installed")
         return
     result = setup_tui.install_skills(to_install)
     for hid in result["installed"]:
