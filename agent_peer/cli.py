@@ -220,11 +220,7 @@ def cmd_wait(args):
         label = session or "(default)"
         print(f"❌ 'agent-peer wait' for session '{label}' is already running in another process. Close the old one before starting a new one.", file=sys.stderr)
         sys.exit(1)
-    if not compat.IS_WINDOWS:
-        try:
-            os.chmod(lock_path, 0o600)
-        except OSError:
-            pass
+    compat.secure_file(lock_path)
 
     try:
         msgs = wait_for_message(session=session, timeout=timeout)

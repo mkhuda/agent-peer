@@ -105,7 +105,7 @@ class PeerListener:
         self.server_sock.bind()
         self.server_sock.listen(10)
         if not compat.IS_WINDOWS:
-            os.chmod(self.sock_path, 0o600)
+            os.chmod(self.sock_path, 0o600)  # no real file to secure on Windows - Named Pipes have their own ACL
 
         # 3. Create a <name>.sock symlink for convenience - POSIX only, Windows
         # needs Admin/Dev Mode for unprivileged symlinks, and doesn't need one.
@@ -125,8 +125,7 @@ class PeerListener:
         }
         with open(self.key_path, "w", encoding="utf-8") as f:
             json.dump(key_data, f)
-        if not compat.IS_WINDOWS:
-            os.chmod(self.key_path, 0o600)
+        compat.secure_file(self.key_path)
 
         # 5. Write session json
         session_data = {

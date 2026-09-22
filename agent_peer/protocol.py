@@ -6,6 +6,7 @@ import secrets
 import hashlib
 from typing import Optional
 
+from . import compat
 from .compat import is_pid_alive, get_process_field, get_process_start_time as get_proc_start  # noqa: F401 - re-exported
 
 CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
@@ -18,14 +19,11 @@ CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
 LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 
 def ensure_dirs():
-    # Only our own directories are locked to 0700 - SOCKET_DIR/SESSIONS_DIR
+    # Only our own directories are locked down - SOCKET_DIR/SESSIONS_DIR
     # belong to Claude Code's own protocol.
     for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR):
         os.makedirs(d, exist_ok=True)
-        try:
-            os.chmod(d, 0o700)
-        except OSError:
-            pass
+        compat.secure_dir(d)
     os.makedirs(SOCKET_DIR, exist_ok=True)
     os.makedirs(SESSIONS_DIR, exist_ok=True)
 

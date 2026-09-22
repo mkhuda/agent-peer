@@ -1,6 +1,7 @@
 """Every OS-specific call agent_peer makes, isolated here - nothing else
 checks sys.platform. POSIX paths are the existing behavior, unchanged."""
 
+import getpass
 import os
 import sys
 import socket
@@ -8,6 +9,36 @@ import subprocess
 import time
 
 IS_WINDOWS = sys.platform == "win32"
+
+
+def current_username() -> str:
+    return os.environ.get("USER") or os.environ.get("USERNAME") or getpass.getuser()
+
+
+def secure_file(path: str) -> None:
+    """Owner-only. POSIX: chmod 0600. Windows: icacls (verified live)."""
+    if not IS_WINDOWS:
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+    else:
+        user = current_username()
+        subprocess.run(["icacls", path, "/inheritance:r", "/grant:r", f"{user}:(F)"],
+                        capture_output=True, check=False)
+
+
+def secure_dir(path: str) -> None:
+    """Owner-only, inherited by future children. POSIX: chmod 0700."""
+    if not IS_WINDOWS:
+        try:
+            os.chmod(path, 0o700)
+        except OSError:
+            pass
+    else:
+        user = current_username()
+        subprocess.run(["icacls", path, "/inheritance:r", "/grant:r", f"{user}:(OI)(CI)(F)"],
+                        capture_output=True, check=False)
 
 
 # --- Transport: bind/accept/connect over the mesh's own two-frame protocol ---

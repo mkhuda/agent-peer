@@ -5,14 +5,7 @@ import time
 from typing import List, Dict, Any, Optional
 
 from .protocol import INBOX_FILE, get_session_inbox_path, get_cursor_path, ensure_dirs
-
-def _secure(path: str):
-    """Restrict to owner-only, matching the socket/key file permissions -
-    these files carry full message content in plain text."""
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass
+from .compat import secure_file as _secure
 
 def append_inbox(
     record: Dict[str, Any],
