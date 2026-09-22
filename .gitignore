@@ -30,3 +30,4 @@ docs/tasks/
 .dev/
 CLAUDE.md
 AGENTS.md
+.agents/
