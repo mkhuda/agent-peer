@@ -1,16 +1,15 @@
-"""Interactive `agent-peer setup`: curses checkbox picker + skill file install.
+"""Interactive `agent-peer setup`: checkbox picker + skill file install.
 
-`pick_harnesses` is the only curses-dependent part; `install_skills` and
+`pick_harnesses` is the only terminal-dependent part - curses on POSIX,
+msvcrt on Windows (no extra dependency either way). `install_skills`/
 `remove_skills` are plain file copies/deletes so tests drive them directly.
-POSIX-only by design (stdlib curses needs no extra dependency on Windows) -
-matches agent-peer's existing macOS/Linux-only scope.
 """
 
 import os
 import shutil
 import sys
 
-from agent_peer import harness_detect
+from agent_peer import compat, harness_detect
 
 
 def install_skills(harness_ids, home=None):
@@ -56,14 +55,59 @@ def _initial_checked(entries):
     return {e["id"] for e in entries if e["installed"] or e["skill_present"]}
 
 
-def pick_harnesses(entries):
-    """Curses checkbox picker. Returns the set of selected harness ids.
+def _entry_line(entry, checked):
+    mark = "[x]" if entry["id"] in checked else "[ ]"
+    state = entry["evidence"] if entry["installed"] else "not detected - check to install anyway"
+    if entry["skill_present"]:
+        state += " (skill already installed)"
+    return f"{mark} {entry['label']}: {state}"
 
-    Space toggles, Enter confirms, a/n select-all/none, q quits keeping the
-    initial state. Raises RuntimeError when there is no usable TTY.
+
+def _pick_harnesses_windows(entries):
+    import msvcrt
+
+    checked = _initial_checked(entries)
+    cursor = 0
+    sys.stdout.write("\x1b[?25l")
+    try:
+        while True:
+            sys.stdout.write("\x1b[H\x1b[J")
+            print("agent-peer setup - Space toggles, Enter confirms, a/n all/none, q quits\n")
+            for i, entry in enumerate(entries):
+                prefix = "> " if i == cursor else "  "
+                print(prefix + _entry_line(entry, checked))
+            sys.stdout.flush()
+            ch = msvcrt.getwch()
+            if ch in ("\x00", "\xe0"):
+                ch2 = msvcrt.getwch()
+                if ch2 == "H":
+                    cursor = (cursor - 1) % len(entries)
+                elif ch2 == "P":
+                    cursor = (cursor + 1) % len(entries)
+            elif ch == " ":
+                checked.symmetric_difference_update({entries[cursor]["id"]})
+            elif ch == "\r":
+                return set(checked)
+            elif ch in ("q", "\x1b"):
+                return _initial_checked(entries)
+            elif ch == "a":
+                checked.update(e["id"] for e in entries)
+            elif ch == "n":
+                checked.clear()
+    finally:
+        sys.stdout.write("\x1b[?25h")
+        sys.stdout.flush()
+
+
+def pick_harnesses(entries):
+    """Checkbox picker (curses on POSIX, msvcrt on Windows). Returns the
+    selected harness ids. Space toggles, Enter confirms, a/n select-all/none,
+    q quits keeping the initial state. Raises RuntimeError with no TTY.
     """
     if not sys.stdin.isatty():
         raise RuntimeError("no TTY on stdin - run `agent-peer setup --all` instead")
+    if compat.IS_WINDOWS:
+        return _pick_harnesses_windows(entries)
     try:
         import curses
     except ImportError as exc:
@@ -78,11 +122,7 @@ def pick_harnesses(entries):
             stdscr.clear()
             stdscr.addstr(0, 0, "agent-peer setup - Space toggles, Enter confirms, a/n all/none, q quits")
             for i, entry in enumerate(entries):
-                mark = "[x]" if entry["id"] in checked else "[ ]"
-                state = entry["evidence"] if entry["installed"] else "not detected - check to install anyway"
-                if entry["skill_present"]:
-                    state += " (skill already installed)"
-                line = f"{mark} {entry['label']}: {state}"
+                line = _entry_line(entry, checked)
                 attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
                 stdscr.addstr(i + 2, 0, line[: curses.COLS - 1], attr)
             key = stdscr.getch()
