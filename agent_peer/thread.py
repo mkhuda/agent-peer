@@ -46,12 +46,14 @@ def _read_last_record(path: str) -> Optional[Dict[str, Any]]:
             if chunk.rstrip(b"\n").count(b"\n") >= 1 or pos == 0:
                 break
         lines = [ln for ln in chunk.decode("utf-8", errors="replace").splitlines() if ln.strip()]
-    if not lines:
-        return None
-    try:
-        return json.loads(lines[-1])
-    except Exception:
-        return None
+    # A torn last line (e.g. a crash mid-write) must not reset seq to 1 -
+    # fall back to the nearest valid line in this same tail chunk.
+    for ln in reversed(lines):
+        try:
+            return json.loads(ln)
+        except Exception:
+            continue
+    return None
 
 
 def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str, Any]:
@@ -121,6 +123,8 @@ def touch_thread_presence(thread_id: str, participant: str):
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
     lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
+    if lock_handle is None:
+        return  # best-effort - skip this update rather than write unlocked
     try:
         try:
             with open(path, "r", encoding="utf-8") as f:

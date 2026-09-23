@@ -68,6 +68,41 @@ def test_send_without_target_or_thread_is_refused():
         assert "Missing target" in r.stderr
 
 
+def test_seq_survives_a_torn_last_line():
+    """A crash mid-write can leave a truncated/corrupt final line - the next
+    append must find the last *valid* record, not reset seq to 1."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "one", "--sender", "foreman"], home)
+        run_cli(["send", "--thread", "sync", "two", "--sender", "foreman"], home)
+
+        path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
+        with open(path, "a", encoding="utf-8") as f:
+            f.write('{"seq": 3, "ts": 1, "from": "foreman", "content": "trunc')  # no closing brace, no newline
+
+        r = run_cli(["send", "--thread", "sync", "three", "--sender", "foreman"], home)
+        assert r.returncode == 0, r.stderr
+        assert "seq 3" in r.stdout, f"expected the torn line to be skipped, not counted: {r.stdout}"
+
+
+def test_presence_update_is_skipped_not_written_unlocked_when_contended():
+    """touch_thread_presence() must never write presence.json while it
+    couldn't acquire the lock - simulate contention with a live PID (this
+    test process's own) already holding the presence lock."""
+    with isolated_home() as home:
+        threads_dir = os.path.join(home, ".agent-peer", "threads")
+        os.makedirs(threads_dir, exist_ok=True)
+        contended_lock = os.path.join(threads_dir, "sync.lock.presence")
+        with open(contended_lock, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))  # this test process is alive -> lock stays held
+
+        run_cli(["send", "--thread", "sync", "hello", "--sender", "foreman"], home)
+        r = run_cli(["thread", "sync", "--name", "eng", "--timeout", "2"], home)
+        assert r.returncode == 0, r.stderr  # the message still gets delivered
+
+        presence_path = os.path.join(threads_dir, "sync.presence.json")
+        assert not os.path.exists(presence_path), "presence.json must not be written while the lock was contended"
+
+
 def test_concurrent_thread_appends_get_unique_sequential_seq():
     import subprocess
     import sys as _sys

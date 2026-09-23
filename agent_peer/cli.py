@@ -442,7 +442,7 @@ def main():
 
     # thread - shared multi-party discussion
     p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time")
-    p_thread.add_argument("thread_id", help="Thread name (e.g. ottoshare-sync) - shared by everyone who posts/waits on it, nothing to create first")
+    p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
     p_thread.set_defaults(func=cmd_thread)
