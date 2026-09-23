@@ -141,6 +141,18 @@ def test_logs_thread_query_filters_by_content():
         assert "unrelated topic" not in r.stdout
 
 
+def test_logs_thread_as_viewer_highlights_their_own_messages():
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "from foreman", "--sender", "foreman"], home)
+        run_cli(["send", "--thread", "sync", "from an agent", "--sender", "worker-1"], home)
+
+        r = run_cli(["logs", "--thread", "sync", "--as", "foreman", "--no-color"], home)
+        assert r.returncode == 0, r.stderr
+        assert "foreman (you)" in r.stdout
+        assert "worker-1 (you)" not in r.stdout
+        assert "═" in r.stdout  # the double divider used only for the viewer's own card
+
+
 def test_concurrent_thread_appends_get_unique_sequential_seq():
     import subprocess
     import sys as _sys

@@ -88,7 +88,7 @@ def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, edit
             last_seq_box[0] = seq
             if r.get("from") == participant:
                 continue  # already visible from your own typed line
-            _print_live(format_thread_entry(r, use_color=use_color), editor)
+            _print_live(format_thread_entry(r, use_color=use_color, viewer=participant), editor)
         touch_thread_presence(thread_id, participant)
         stop_event.wait(0.5)
 
@@ -113,7 +113,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
         # unlike _poll_loop, backlog is full history - self-echo suppression
         # there only hides what your own live typing already echoed locally,
         # a rejoin has no such echo and must show everything
-        print(format_thread_entry(r, use_color=use_color))
+        print(format_thread_entry(r, use_color=use_color, viewer=participant))
 
     # A real tty gets the raw/cbreak multi-line editor (Esc clears the whole
     # composition, Shift+Enter/Alt+Enter/trailing "\" all continue composing

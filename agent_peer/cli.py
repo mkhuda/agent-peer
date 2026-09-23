@@ -306,6 +306,7 @@ def cmd_logs(args):
             query=args.query,
             raw=args.raw,
             no_color=args.no_color,
+            viewer=args.viewer,
         )
         return
     show_logs(
@@ -493,6 +494,7 @@ def main():
     p_logs.add_argument("-s", "--name", "--session", dest="session", default=None, help="Filter messages by session name or PID")
     p_logs.add_argument("-q", "--grep", "--query", dest="query", default=None, help="Search messages containing keyword")
     p_logs.add_argument("--thread", default=None, metavar="ID", help="View a shared thread's transcript instead of the mesh inbox - shows who's currently present, supports -f/--follow")
+    p_logs.add_argument("--as", dest="viewer", default=None, metavar="NAME", help="With --thread: highlight this participant's own messages (double divider, different accent, '(you)' badge)")
     p_logs.add_argument("--raw", action="store_true", help="Output raw unformatted JSON lines")
     p_logs.add_argument("--no-color", action="store_true", help="Disable ANSI color codes")
     p_logs.set_defaults(func=cmd_logs)

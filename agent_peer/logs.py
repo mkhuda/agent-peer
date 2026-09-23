@@ -388,9 +388,12 @@ def _thread_urgency_tag(content: str, use_color: bool) -> str:
         return f"{BRIGHT_YELLOW}{BOLD}[CHANGE]{RESET}"
     return f"{BRIGHT_CYAN}[FYI]{RESET}"
 
-def format_thread_entry(record: dict, use_color: bool = True) -> str:
+def format_thread_entry(record: dict, use_color: bool = True, viewer: Optional[str] = None) -> str:
     """A thread record has no recipient/priority (it's shared, not
-    one-to-one) - a simpler card than format_log_entry's inbox cards."""
+    one-to-one) - a simpler card than format_log_entry's inbox cards.
+    `viewer` (the reader's own participant name) gets a visually distinct
+    card - a double divider and a different accent color - so a busy
+    thread stays easy to scan for "did I already say that" at a glance."""
     seq = record.get("seq")
     time_str = time.strftime("%H:%M:%S", time.localtime(record.get("ts", 0)))
     sender = record.get("from", "unknown")
@@ -398,13 +401,19 @@ def format_thread_entry(record: dict, use_color: bool = True) -> str:
     term_width = shutil.get_terminal_size((88, 24)).columns
     divider_len = min(term_width, 100)
     urgency_tag = _thread_urgency_tag(content, use_color)
+    is_viewer = viewer is not None and sender == viewer
 
     if use_color:
-        div_bar = f"{DIM}{'━' * divider_len}{RESET}"
-        header = f" {BOLD}#{seq}{RESET} {DIM}{time_str}{RESET}  {BOLD}{BRIGHT_CYAN}{sender}{RESET}"
+        accent = BRIGHT_GREEN if is_viewer else BRIGHT_CYAN
+        div_char = "═" if is_viewer else "━"
+        div_bar = f"{DIM}{div_char * divider_len}{RESET}"
+        you_badge = f" {DIM}(you){RESET}" if is_viewer else ""
+        header = f" {BOLD}#{seq}{RESET} {DIM}{time_str}{RESET}  {BOLD}{accent}{sender}{RESET}{you_badge}"
     else:
-        div_bar = "━" * divider_len
-        header = f" #{seq} {time_str}  {sender}"
+        div_char = "═" if is_viewer else "━"
+        div_bar = div_char * divider_len
+        you_badge = " (you)" if is_viewer else ""
+        header = f" #{seq} {time_str}  {sender}{you_badge}"
     if urgency_tag:
         header += f"  {urgency_tag}"
 
@@ -418,9 +427,11 @@ def show_thread_logs(
     query: Optional[str] = None,
     raw: bool = False,
     no_color: bool = False,
+    viewer: Optional[str] = None,
 ):
     """Human-readable view of a shared thread - a viewer can watch a
-    meeting happen without needing to 'thread <id>' (wait) on it."""
+    meeting happen without needing to 'thread <id>' (wait) on it. `viewer`
+    highlights that participant's own messages (see format_thread_entry)."""
     use_color = not no_color and supports_color()
     all_records = read_thread(thread_id)
     records = all_records
@@ -441,7 +452,7 @@ def show_thread_logs(
         print(f"{DIM}{status}{RESET}\n" if use_color else f"{status}\n")
 
     for r in records_to_show:
-        print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color))
+        print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color, viewer=viewer))
     sys.stdout.flush()
 
     if not follow:
@@ -459,7 +470,7 @@ def show_thread_logs(
                 last_seq = seq
                 if query and query.lower() not in r.get("content", "").lower():
                     continue
-                print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color))
+                print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color, viewer=viewer))
                 sys.stdout.flush()
             time.sleep(0.5)
     except KeyboardInterrupt:
