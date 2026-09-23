@@ -6,6 +6,20 @@ from typing import List, Dict, Optional, Tuple
 
 from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
 
+_json_decoder = json.JSONDecoder()
+
+
+def _load_json_lenient(raw: str):
+    """A session file with valid JSON plus trailing garbage (confirmed live:
+    a native Claude Code session's own write left a stray extra '}') must
+    not make the whole session vanish - recover the leading object instead
+    of raising, since agent-peer doesn't control how that file gets written."""
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        obj, _ = _json_decoder.raw_decode(raw)
+        return obj
+
 PID_JSON_RE = re.compile(r"^(\d+)\.json$")
 KEY_FILE_RE = re.compile(r"^(\d+)\.[0-9a-f]{64}\.key$")
 
@@ -66,7 +80,7 @@ def get_active_sessions() -> List[Dict]:
         json_path = os.path.join(SESSIONS_DIR, fname)
         try:
             with open(json_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                data = _load_json_lenient(f.read())
         except Exception:
             continue
 
