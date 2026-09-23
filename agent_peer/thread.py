@@ -93,11 +93,25 @@ def _mentions(content: str, name: str) -> bool:
     return f"@{name}" in content or "@all" in content or "[stop]" in content
 
 
-def _session_busy(sessions, name: str, pid: int) -> bool:
+def _find_session(sessions, name: str, pid: int):
     for session in sessions:
         if session.get("name") == name or session.get("pid") == pid:
-            return session.get("status") == "busy"
-    return False
+            return session
+    return None
+
+
+def _push_wanted(session) -> bool:
+    # Native targets get pushed (their own poll can't wake them): real
+    # Claude Code sessions, and Codex sessions with a queue thread id.
+    # Managed-listener sessions (agy/muse/pi/opencode) are already covered
+    # by the thread poll that put them in presence - pushing would only
+    # double-notify their inbox. Unknown session: attempt anyway, the
+    # push fails silently on a dead target either way.
+    if session is None:
+        return True
+    if session.get("agentType") == "CODEX" and session.get("codexThreadId"):
+        return True
+    return not session.get("managedByAgentPeer")
 
 
 def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str, int]]:
@@ -121,7 +135,10 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
             continue
         if now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
             continue
-        if _session_busy(sessions, name, pid) and not _mentions(content, name):
+        session = _find_session(sessions, name, pid)
+        if not _push_wanted(session):
+            continue
+        if session is not None and session.get("status") == "busy" and not _mentions(content, name):
             continue
         targets.append((name, pid))
     return targets

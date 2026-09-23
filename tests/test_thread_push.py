@@ -8,12 +8,60 @@ and never fail the poster on dead targets.
 import glob
 import json
 import os
+import socket
+import threading
 import time
 import unittest
 
 from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+class DummyNativeServer:
+    """A fake native-Claude UDS endpoint: accepts connections, records raw
+    bytes. Proves a fanout push actually went out over socket transport."""
+
+    def __init__(self, sock_path):
+        self.received = []
+        self._stop = threading.Event()
+        if os.path.exists(sock_path):
+            os.unlink(sock_path)
+        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self._sock.bind(sock_path)
+        self._sock.listen(5)
+        self._sock.settimeout(0.2)
+        self._thread = threading.Thread(target=self._serve, daemon=True)
+        self._thread.start()
+
+    def _serve(self):
+        while not self._stop.is_set():
+            try:
+                conn, _ = self._sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            with conn:
+                conn.settimeout(2)
+                chunks = []
+                try:
+                    while True:
+                        data = conn.recv(4096)
+                        if not data:
+                            break
+                        chunks.append(data)
+                except socket.timeout:
+                    pass
+                self.received.append(b"".join(chunks))
+
+    def close(self):
+        self._stop.set()
+        self._thread.join(timeout=3)
+        self._sock.close()
+
+    def text(self):
+        return b"".join(self.received).decode("utf-8", errors="replace")
 
 
 def _inbox_contents(home, name):
@@ -78,17 +126,59 @@ class ThreadPushTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc
 
-    def test_push_delivered_to_active_participant(self):
+    def _native_session(self, name, status="idle"):
+        """Craft a native-Claude-style registry entry (not managed) whose
+        socket is a dummy server. Returns the server (caller must close)."""
+        pid = os.getpid()  # alive by definition
+        sock_path = os.path.join(self.home, f"{name}.sock")
+        server = DummyNativeServer(sock_path)
+        sessions = os.path.join(self.home, ".claude", "sessions")
+        os.makedirs(sessions, exist_ok=True)
+        with open(os.path.join(sessions, f"{pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump(
+                {
+                    "name": name,
+                    "status": status,
+                    "managedByAgentPeer": False,
+                    "messagingSocketPath": sock_path,
+                },
+                fh,
+            )
+        # resolve_session reads the token from the key file, not the json.
+        with open(os.path.join(sessions, f"{pid}.test.key"), "w", encoding="utf-8") as fh:
+            json.dump({"peerToken": "test-token"}, fh)
+        return server
+
+    def _touch_presence(self, thread_id, name):
+        path = os.path.join(self.home, ".agent-peer", "threads", f"{thread_id}.presence.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                presence = json.load(fh)
+        except Exception:
+            presence = {}
+        presence[name] = {"pid": 424242, "last_seen": time.time()}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(presence, fh)
+
+    def test_push_delivered_to_native_participant(self):
+        server = self._native_session("nat")
+        try:
+            self._touch_presence("t1", "nat")
+            self._post("t1", "bob", "hello team")
+            self.assertTrue(
+                wait_until(lambda: "[thread: t1 #1 from bob]: hello team" in server.text(), timeout=5),
+                "framed push never arrived over the native socket",
+            )
+        finally:
+            server.close()
+
+    def test_managed_session_skipped_no_dupe(self):
         self._listen("anna")
         self._waiter("t1", "anna")
         self._post("t1", "bob", "hello team")
-        self.assertTrue(
-            wait_until(
-                lambda: any("[thread: t1 #1 from bob]: hello team" in c for c in _inbox_contents(self.home, "anna")),
-                timeout=5,
-            ),
-            "framed push never landed in anna's inbox",
-        )
+        time.sleep(1)  # fanout runs inside the post call; absence after is final
+        self.assertEqual(_inbox_contents(self.home, "anna"), [], "managed listener must not get an inbox dupe")
 
     def test_self_push_suppressed(self):
         self._listen("solo")
@@ -131,22 +221,19 @@ class ThreadPushTest(unittest.TestCase):
             self.assertIn("hello ghosts", fh.read())
 
     def test_busy_gating(self):
-        proc = self._listen("beth")
-        run_cli(["thread", "t1", "--name", "beth", "--timeout", "1"], self.home)
-        reg = os.path.join(self.home, ".claude", "sessions", f"{proc.pid}.json")
-        with open(reg, encoding="utf-8") as fh:
-            meta = json.load(fh)
-        meta["status"] = "busy"
-        with open(reg, "w", encoding="utf-8") as fh:
-            json.dump(meta, fh)
-        self._post("t1", "bob", "general banter")
-        time.sleep(1)
-        self.assertEqual(_inbox_contents(self.home, "beth"), [], "busy + no mention must not push")
-        self._post("t1", "bob", "@beth urgent")
-        self.assertTrue(
-            wait_until(lambda: _inbox_contents(self.home, "beth"), timeout=5),
-            "@beth mention must push through busy gating",
-        )
+        server = self._native_session("beth", status="busy")
+        try:
+            self._touch_presence("t1", "beth")
+            self._post("t1", "bob", "general banter")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "busy + no mention must not push")
+            self._post("t1", "bob", "@beth urgent")
+            self.assertTrue(
+                wait_until(lambda: "@beth urgent" in server.text(), timeout=5),
+                "@beth mention must push through busy gating",
+            )
+        finally:
+            server.close()
 
     def test_skill_docs_routing_convention(self):
         for harness in ("agy", "claude", "codex", "muse", "opencode", "pi"):
@@ -199,6 +286,22 @@ class AutoNameFixOneTest(unittest.TestCase):
     def test_unregistered_falls_back_to_invented(self):
         self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", 999998)
         self.assertEqual(self.protocol.auto_session_name(), "claude-999998")
+
+
+class PushWantedTest(unittest.TestCase):
+    """Direction (b): push natives + codex-queue, skip managed listeners,
+    attempt when the session record is unknown. Pure function, no HOME."""
+
+    def test_matrix(self):
+        from agent_peer.thread import _push_wanted
+
+        self.assertTrue(_push_wanted(None))
+        self.assertTrue(_push_wanted({"managedByAgentPeer": False}))
+        self.assertTrue(
+            _push_wanted({"managedByAgentPeer": True, "agentType": "CODEX", "codexThreadId": "t"})
+        )
+        self.assertFalse(_push_wanted({"managedByAgentPeer": True}))
+        self.assertFalse(_push_wanted({"managedByAgentPeer": True, "agentType": "CODEX"}))
 
 
 if __name__ == "__main__":
