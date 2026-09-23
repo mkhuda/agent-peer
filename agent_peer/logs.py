@@ -371,7 +371,7 @@ def format_thread_presence_header(thread_id: str, use_color: bool = True) -> str
     if not presence:
         return ""
     now = time.time()
-    parts = [f"{name} ({_fmt_age(now - info.get('last_seen', 0))} ago)" for name, info in sorted(presence.items())]
+    parts = [f"{name} ({_fmt_age(max(0.0, now - info.get('last_seen', 0)))} ago)" for name, info in sorted(presence.items())]
     label = f"Present: {', '.join(parts)}"
     return f"{DIM}{label}{RESET}" if use_color else label
 
@@ -422,7 +422,8 @@ def show_thread_logs(
     """Human-readable view of a shared thread - a viewer can watch a
     meeting happen without needing to 'thread <id>' (wait) on it."""
     use_color = not no_color and supports_color()
-    records = read_thread(thread_id)
+    all_records = read_thread(thread_id)
+    records = all_records
     if query:
         q_lower = query.lower()
         records = [r for r in records if q_lower in r.get("content", "").lower()]
@@ -446,7 +447,9 @@ def show_thread_logs(
     if not follow:
         return
 
-    last_seq = records_to_show[-1]["seq"] if records_to_show else 0
+    # From the unfiltered thread, not records_to_show - a query that matches
+    # nothing (or only an old message) must not make follow replay history.
+    last_seq = all_records[-1]["seq"] if all_records else 0
     try:
         while True:
             for r in read_thread(thread_id):

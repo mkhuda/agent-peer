@@ -1,6 +1,6 @@
 """A session file with valid JSON plus trailing garbage must still show up -
 the real bug behind a native Claude Code session (PID 19231,
-ottoshare-factory-98) vanishing from `list`/`send` (codex-8763, 2026-09-23).
+example-project-98) vanishing from `list`/`send` (codex-8763, 2026-09-23).
 
 Confirmed live: Claude Code's own binary (v2.1.280) wrote a session file
 ending in a literal extra '}' - not an agent-peer write, and not a race
@@ -22,8 +22,8 @@ def test_session_with_trailing_garbage_still_appears_in_list():
 
         pid = os.getpid()
         session = {
-            "name": "ottoshare-factory-98",
-            "cwd": "/Users/rg/projects/ottoshare-factory",
+            "name": "example-project-98",
+            "cwd": "/Users/redacted/projects/example-project",
             "status": "idle",
             "messagingSocketPath": f"/tmp/cc-socks/{pid}.sock",
         }
@@ -36,4 +36,4 @@ def test_session_with_trailing_garbage_still_appears_in_list():
 
         result = run_cli(["list"], home)
         assert result.returncode == 0, result.stderr
-        assert "ottoshare-factory-98" in result.stdout, result.stdout
+        assert "example-project-98" in result.stdout, result.stdout

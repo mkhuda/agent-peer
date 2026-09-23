@@ -15,13 +15,13 @@ from tests.helpers import isolated_home, run_cli
 
 def test_thread_backlog_delivered_to_a_late_joiner():
     with isolated_home() as home:
-        r = run_cli(["send", "--thread", "sync", "ayo review phase 6", "--sender", "foreman"], home)
+        r = run_cli(["send", "--thread", "sync", "sync ready test", "--sender", "foreman"], home)
         assert r.returncode == 0, r.stderr
         assert "seq 1" in r.stdout
 
         r = run_cli(["thread", "sync", "--name", "eng", "--timeout", "1"], home)
         assert r.returncode == 0, r.stderr
-        assert "ayo review phase 6" in r.stdout
+        assert "sync ready test" in r.stdout
 
 
 def test_thread_self_echo_is_never_delivered_back_to_its_own_author():
@@ -105,13 +105,13 @@ def test_presence_update_is_skipped_not_written_unlocked_when_contended():
 
 def test_logs_thread_shows_presence_header_and_messages():
     with isolated_home() as home:
-        run_cli(["send", "--thread", "sync", "ayo review phase 6", "--sender", "foreman"], home)
-        run_cli(["thread", "sync", "--name", "ottoshare-eng", "--timeout", "1"], home)  # touches presence
+        run_cli(["send", "--thread", "sync", "sync ready test", "--sender", "foreman"], home)
+        run_cli(["thread", "sync", "--name", "worker-1", "--timeout", "1"], home)  # touches presence
 
         r = run_cli(["logs", "--thread", "sync", "--no-color"], home)
         assert r.returncode == 0, r.stderr
-        assert "Present: ottoshare-eng" in r.stdout
-        assert "ayo review phase 6" in r.stdout
+        assert "Present: worker-1" in r.stdout
+        assert "sync ready test" in r.stdout
         assert "#1" in r.stdout
 
 
