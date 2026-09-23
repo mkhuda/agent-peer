@@ -1,5 +1,6 @@
 import os
 import json
+import re
 import threading
 import time
 from typing import Any, Dict, List, Optional, Tuple
@@ -93,6 +94,12 @@ def _mentions(content: str, name: str) -> bool:
     return f"@{name}" in content or "@all" in content or "[stop]" in content
 
 
+def _mention_tokens(content: str):
+    # Token-exact (not substring): "@codex-8763" must not match a session
+    # literally named "codex-8763-2" in another project.
+    return set(re.findall(r"@([A-Za-z0-9_.\-]+)", content))
+
+
 def _find_session(sessions, name: str, pid: int):
     for session in sessions:
         if session.get("name") == name or session.get("pid") == pid:
@@ -116,18 +123,23 @@ def _push_wanted(session) -> bool:
 
 def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str, int]]:
     """Active presence entries eligible for a native push: not the sender,
-    not this process, seen recently. Resolved by name at push time (the
-    presence pid is the waiter/join process, never a registered session).
-    A busy participant is only pushed on @name/@all/[stop] (anti-bombing).
-    A soft-left participant likewise, and the knock restores them."""
+    not this process, seen recently, and with no live reader process (a
+    live waiter already delivers via its own poll - the socket is only a
+    wake-up backstop). Resolved by name at push time (the presence pid is
+    the waiter/join process, never a registered session). A busy
+    participant is only pushed on @name/@all/[stop] (anti-bombing). A
+    soft-left participant likewise, and the knock restores them. Plus a
+    one-shot knock for mesh sessions explicitly @mentioned that have no
+    presence entry at all (never enrolled - knock is not an invite)."""
     now = time.time()
     try:
         sessions = get_active_sessions()
     except Exception:
         sessions = []
+    presence = read_thread_presence(thread_id)
     targets = []
     knocked = []
-    for name, info in read_thread_presence(thread_id).items():
+    for name, info in presence.items():
         if not isinstance(info, dict):
             continue
         pid = info.get("pid")
@@ -136,12 +148,13 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         if not isinstance(pid, int):
             continue
         left = bool(info.get("left"))
-        if left:
-            # Parked deliberately: no expiry, banter never knocks, an
-            # explicit mention restores presence and pushes (Phase 6).
-            if not _mentions(content, name):
-                continue
-        elif now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+        # Staleness first: a reused pid must never resurrect a wandered-off
+        # entry - the timestamp is the safety net, liveness only suppresses.
+        if not left and now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+            continue
+        if compat.is_pid_alive(pid):
+            continue
+        if left and not _mentions(content, name):
             continue
         session = _find_session(sessions, name, pid)
         if not _push_wanted(session):
@@ -151,6 +164,17 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         targets.append((name, pid))
         if left:
             knocked.append(name)
+    pushed = {name for name, _ in targets}
+    for token in _mention_tokens(content):
+        # Mesh-wide summons: exact name, no presence entry (the presence
+        # loop above already decided everyone inside the room), no enroll.
+        if token == sender or token in pushed or token in presence:
+            continue
+        session = next((s for s in sessions if s.get("name") == token), None)
+        if session is None:
+            continue
+        pid = session.get("pid")
+        targets.append((token, pid if isinstance(pid, int) else -1))
     if knocked:
         restore_thread_presence(thread_id, knocked)
     return targets
@@ -232,9 +256,10 @@ def _write_thread_cursor(thread_id: str, participant: str, seq: int):
     _secure(path)
 
 
-def touch_thread_presence(thread_id: str, participant: str):
-    """Records that `participant` is actively waiting right now, so a viewer
-    can tell "who's listening" from "who has ever posted"."""
+def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
+    """Records that `participant` is waiting right now, so a viewer can
+    tell "who's listening" from "who has ever posted". `left` marks a peek
+    (timeout-bounded): visible in the room, but gated from banter push."""
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
     lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
@@ -246,7 +271,7 @@ def touch_thread_presence(thread_id: str, participant: str):
                 presence = json.load(f)
         except Exception:
             presence = {}
-        presence[participant] = {"pid": os.getpid(), "last_seen": time.time()}
+        presence[participant] = {"pid": os.getpid(), "last_seen": time.time(), "left": left}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
@@ -340,8 +365,10 @@ def wait_for_thread_message(
 ) -> Optional[List[Dict[str, Any]]]:
     """Immediate-backlog-then-poll, like inbox.py's wait_for_message but
     shared. Cursor advances to unread[-1]'s seq (not a fresh re-read, which
-    could race a concurrent append and skip it before it's ever returned)."""
-    touch_thread_presence(thread_id, participant)
+    could race a concurrent append and skip it before it's ever returned).
+    Timeout-as-intent: a bounded wait is a peek (gated), only an indefinite
+    wait arms full room presence."""
+    touch_thread_presence(thread_id, participant, left=(timeout is not None))
 
     unread = get_thread_unread(thread_id, participant)
     if unread:

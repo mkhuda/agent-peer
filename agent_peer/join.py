@@ -89,7 +89,7 @@ def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, edit
             if r.get("from") == participant:
                 continue  # already visible from your own typed line
             _print_live(format_thread_entry(r, use_color=use_color, viewer=participant), editor)
-        touch_thread_presence(thread_id, participant)
+        touch_thread_presence(thread_id, participant, left=False)
         stop_event.wait(0.5)
 
 
@@ -125,7 +125,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
 
     last_seq_box = [backlog[-1]["seq"] if backlog else 0]
     stop_event = threading.Event()
-    touch_thread_presence(thread_id, participant)
+    touch_thread_presence(thread_id, participant, left=False)
     poller = threading.Thread(target=_poll_loop, args=(thread_id, participant, last_seq_box, stop_event, use_color, editor), daemon=True)
     poller.start()
 

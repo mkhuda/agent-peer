@@ -227,7 +227,19 @@ class ThreadPushTest(unittest.TestCase):
         self.assertIn("#1", rejoined.stdout)
         self.assertIn("#2", rejoined.stdout)
         self.assertIn("rick", _presence(self.home, "t1"))
-        self.assertFalse(_presence(self.home, "t1")["rick"].get("left"), "rejoin must clear left")
+        # 0029 timeout-as-intent: a bounded rejoin is a peek, so it replays
+        # the backlog but stays gated; only an indefinite wait clears left.
+        self.assertTrue(_presence(self.home, "t1")["rick"].get("left"), "timeout rejoin stays gated")
+        indefinite = spawn_cli(["thread", "t1", "--name", "rick"], self.home)
+        self.procs.append(indefinite)
+        try:
+            self.assertTrue(
+                wait_until(lambda: _presence(self.home, "t1").get("rick", {}).get("left") is False, timeout=5),
+                "indefinite rejoin must clear left",
+            )
+        finally:
+            stop_cli(indefinite)
+            self.procs.remove(indefinite)
 
     def test_dead_presence_never_fails_poster(self):
         path = os.path.join(self.home, ".agent-peer", "threads", "t1.presence.json")
