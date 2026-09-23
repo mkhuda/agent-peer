@@ -8,6 +8,7 @@ from typing import Optional, Dict, List, Tuple
 
 from .protocol import INBOX_FILE, get_session_inbox_path
 from .registry import get_active_sessions
+from .thread import read_thread, read_thread_presence
 
 # ANSI Color Codes
 RESET = "\033[0m"
@@ -357,3 +358,107 @@ def show_logs(
         except KeyboardInterrupt:
             print("\nLog streaming stopped.")
             return
+
+def _fmt_age(seconds: float) -> str:
+    if seconds < 60:
+        return f"{int(seconds)}s"
+    if seconds < 3600:
+        return f"{int(seconds // 60)}m"
+    return f"{int(seconds // 3600)}h"
+
+def format_thread_presence_header(thread_id: str, use_color: bool = True) -> str:
+    presence = read_thread_presence(thread_id)
+    if not presence:
+        return ""
+    now = time.time()
+    parts = [f"{name} ({_fmt_age(now - info.get('last_seen', 0))} ago)" for name, info in sorted(presence.items())]
+    label = f"Present: {', '.join(parts)}"
+    return f"{DIM}{label}{RESET}" if use_color else label
+
+def _thread_urgency_tag(content: str, use_color: bool) -> str:
+    m = re.search(r'\[(fyi|change|stop)(?:\s+from\s+[^\]]+)?\]:?', content, re.IGNORECASE)
+    if not m:
+        return ""
+    tag = m.group(1).lower()
+    if not use_color:
+        return f"[{tag.upper()}]"
+    if tag == "stop":
+        return f"{BG_RED}{BRIGHT_WHITE}{BOLD} STOP {RESET}"
+    if tag == "change":
+        return f"{BRIGHT_YELLOW}{BOLD}[CHANGE]{RESET}"
+    return f"{BRIGHT_CYAN}[FYI]{RESET}"
+
+def format_thread_entry(record: dict, use_color: bool = True) -> str:
+    """A thread record has no recipient/priority (it's shared, not
+    one-to-one) - a simpler card than format_log_entry's inbox cards."""
+    seq = record.get("seq")
+    time_str = time.strftime("%H:%M:%S", time.localtime(record.get("ts", 0)))
+    sender = record.get("from", "unknown")
+    content = record.get("content", "")
+    term_width = shutil.get_terminal_size((88, 24)).columns
+    divider_len = min(term_width, 100)
+    urgency_tag = _thread_urgency_tag(content, use_color)
+
+    if use_color:
+        div_bar = f"{DIM}{'━' * divider_len}{RESET}"
+        header = f" {BOLD}#{seq}{RESET} {DIM}{time_str}{RESET}  {BOLD}{BRIGHT_CYAN}{sender}{RESET}"
+    else:
+        div_bar = "━" * divider_len
+        header = f" #{seq} {time_str}  {sender}"
+    if urgency_tag:
+        header += f"  {urgency_tag}"
+
+    body = "\n".join(f"  {line}" for line in content.splitlines())
+    return f"{div_bar}\n{header}\n{body}\n"
+
+def show_thread_logs(
+    thread_id: str,
+    limit: int = 20,
+    follow: bool = False,
+    query: Optional[str] = None,
+    raw: bool = False,
+    no_color: bool = False,
+):
+    """Human-readable view of a shared thread - a viewer can watch a
+    meeting happen without needing to 'thread <id>' (wait) on it."""
+    use_color = not no_color and supports_color()
+    records = read_thread(thread_id)
+    if query:
+        q_lower = query.lower()
+        records = [r for r in records if q_lower in r.get("content", "").lower()]
+    records_to_show = records[-limit:] if limit > 0 else records
+
+    if not raw:
+        if use_color:
+            print(f"\n{BOLD}{BRIGHT_WHITE}📖 THREAD '{thread_id}'{RESET}")
+        else:
+            print(f"\nTHREAD '{thread_id}'")
+        header = format_thread_presence_header(thread_id, use_color)
+        if header:
+            print(header)
+        status = "Streaming... (Press Ctrl+C to stop)" if follow else f"Showing last {len(records_to_show)} of {len(records)} messages"
+        print(f"{DIM}{status}{RESET}\n" if use_color else f"{status}\n")
+
+    for r in records_to_show:
+        print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color))
+    sys.stdout.flush()
+
+    if not follow:
+        return
+
+    last_seq = records_to_show[-1]["seq"] if records_to_show else 0
+    try:
+        while True:
+            for r in read_thread(thread_id):
+                seq = r.get("seq", 0)
+                if seq <= last_seq:
+                    continue
+                last_seq = seq
+                if query and query.lower() not in r.get("content", "").lower():
+                    continue
+                print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color))
+                sys.stdout.flush()
+            time.sleep(0.5)
+    except KeyboardInterrupt:
+        print("\nThread streaming stopped.")
+        return

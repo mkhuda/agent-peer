@@ -103,6 +103,44 @@ def test_presence_update_is_skipped_not_written_unlocked_when_contended():
         assert not os.path.exists(presence_path), "presence.json must not be written while the lock was contended"
 
 
+def test_logs_thread_shows_presence_header_and_messages():
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "ayo review phase 6", "--sender", "foreman"], home)
+        run_cli(["thread", "sync", "--name", "ottoshare-eng", "--timeout", "1"], home)  # touches presence
+
+        r = run_cli(["logs", "--thread", "sync", "--no-color"], home)
+        assert r.returncode == 0, r.stderr
+        assert "Present: ottoshare-eng" in r.stdout
+        assert "ayo review phase 6" in r.stdout
+        assert "#1" in r.stdout
+
+
+def test_logs_thread_with_no_presence_yet_omits_the_header_line():
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "hello", "--sender", "foreman"], home)
+        r = run_cli(["logs", "--thread", "sync", "--no-color"], home)
+        assert r.returncode == 0, r.stderr
+        assert "Present:" not in r.stdout  # nobody has ever run 'thread sync' yet
+
+
+def test_logs_thread_raw_outputs_clean_jsonl():
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "hello", "--sender", "foreman"], home)
+        r = run_cli(["logs", "--thread", "sync", "--raw"], home)
+        assert r.returncode == 0, r.stderr
+        record = json.loads(r.stdout.strip())
+        assert record == {"seq": 1, "from": "foreman", "content": "hello", "ts": record["ts"]}
+
+
+def test_logs_thread_query_filters_by_content():
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "talk about the render range", "--sender", "foreman"], home)
+        run_cli(["send", "--thread", "sync", "unrelated topic", "--sender", "foreman"], home)
+        r = run_cli(["logs", "--thread", "sync", "-q", "render", "--no-color"], home)
+        assert "render range" in r.stdout
+        assert "unrelated topic" not in r.stdout
+
+
 def test_concurrent_thread_appends_get_unique_sequential_seq():
     import subprocess
     import sys as _sys

@@ -11,7 +11,7 @@ from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .thread import append_thread_message, wait_for_thread_message
-from .logs import show_logs
+from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
 from .codex_status import format_codex_status, get_codex_status_dict
@@ -281,6 +281,16 @@ def cmd_thread(args):
 def cmd_logs(args):
     """View full detailed message logs with color formatting and live tail."""
     limit = 0 if args.all else args.limit
+    if args.thread:
+        show_thread_logs(
+            args.thread,
+            limit=limit,
+            follow=args.follow,
+            query=args.query,
+            raw=args.raw,
+            no_color=args.no_color,
+        )
+        return
     show_logs(
         limit=limit,
         session=args.session,
@@ -454,6 +464,7 @@ def main():
     p_logs.add_argument("-f", "-w", "--follow", "--watch", dest="follow", action="store_true", help="Live stream / watch new messages in real-time (like tail -f)")
     p_logs.add_argument("-s", "--name", "--session", dest="session", default=None, help="Filter messages by session name or PID")
     p_logs.add_argument("-q", "--grep", "--query", dest="query", default=None, help="Search messages containing keyword")
+    p_logs.add_argument("--thread", default=None, metavar="ID", help="View a shared thread's transcript instead of the mesh inbox - shows who's currently present, supports -f/--follow")
     p_logs.add_argument("--raw", action="store_true", help="Output raw unformatted JSON lines")
     p_logs.add_argument("--no-color", action="store_true", help="Disable ANSI color codes")
     p_logs.set_defaults(func=cmd_logs)
