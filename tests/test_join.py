@@ -114,17 +114,19 @@ def test_rejoin_shows_the_foremans_own_past_messages_in_backlog():
         assert "my own first message" in result.stdout
 
 
-def test_run_join_does_not_echo_its_own_posted_message_via_the_poller():
-    """A real terminal already echoes what you typed - piped stdin (this
-    test's harness) doesn't, so the only way this text could appear in
-    stdout at all is the poller rendering it as an incoming card. It must
-    not: a participant's own message is filtered out of its own unread."""
+def test_run_join_prints_the_sent_message_once_not_twice():
+    """run_join prints one explicit card for the message you just sent (a
+    real bug, caught live during hand-walk: raw mode's own redraw cleared
+    the typed line, so it visually vanished on Enter - the fix in join.py
+    prints the sent record's card itself, verified end-to-end against a
+    real pty in test_rawline.py). The poller must not ALSO print it via
+    self-echo, which would duplicate it."""
     with isolated_home() as home:
         run_cli(["send", "--thread", "sync", "seed", "--sender", "other-agent"], home)
         result = _run_join_piped(home, "sync", "foreman", "a message from me\n")
         assert result.returncode == 0, result.stderr
-        assert "a message from me" not in result.stdout
-        assert "#2" not in result.stdout  # the poller's card for seq 2 would carry this marker
+        assert result.stdout.count("a message from me") == 1
+        assert result.stdout.count("#2") == 1  # the sent card's own seq marker, printed once
 
         path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
         with open(path, encoding="utf-8") as f:

@@ -46,19 +46,29 @@ class LineEditor:
         its first line joins whatever was already typed, each subsequent
         line becomes its own continuation. Never submits on its own; the
         whole paste still lands in the compose box for an explicit Enter."""
+        pasted_text = pasted_text.replace("\r\n", "\n").replace("\r", "\n")
         paste_lines = pasted_text.split("\n")
         self.lines[-1] += paste_lines[0]
         for extra in paste_lines[1:]:
             self.newline()
             self.lines[-1] = extra
 
+    def clear_rendered_area(self):
+        """Erases whatever this editor last drew (cursor up past any extra
+        lines, then clear to end of screen), without printing anything back
+        - for a caller that wants to print something permanent (a sent
+        message's own card) in that same screen space instead."""
+        if self._printed_extra_lines:
+            sys.stdout.write(f"\033[{self._printed_extra_lines}A")
+        sys.stdout.write("\r\033[J")
+        sys.stdout.flush()
+        self._printed_extra_lines = 0
+
     def render(self):
         """Redraws the whole composition from its own top line - moves the
         cursor up past any extra lines printed by the previous render, then
         clears everything below and reprints."""
-        if self._printed_extra_lines:
-            sys.stdout.write(f"\033[{self._printed_extra_lines}A")
-        sys.stdout.write("\r\033[J")
+        self.clear_rendered_area()
         sys.stdout.write(self.prompt + self.lines[0])
         for extra in self.lines[1:]:
             sys.stdout.write("\n" + CONTINUATION_PREFIX + extra)
@@ -126,7 +136,14 @@ def _read_posix(editor: LineEditor):
         # setcbreak leaves ISIG on - Ctrl+C would be intercepted by the
         # kernel as a real SIGINT instead of reaching us as byte 0x03,
         # which is how we handle it (as data, to return None cleanly).
+        # It also leaves ICRNL on, which silently rewrites \r to \n before
+        # we ever see it - harmless for a single Enter keypress (checked
+        # for both anyway), but doubles into a stray blank line for every
+        # \r\n pasted from a Windows clipboard (\r\n -> \n\n). Clearing it
+        # gets us the real bytes so paste_extend's own CRLF normalization
+        # actually has something to do.
         mode = termios.tcgetattr(fd)
+        mode[0] &= ~termios.ICRNL
         mode[3] &= ~termios.ISIG
         termios.tcsetattr(fd, termios.TCSANOW, mode)
         sys.stdout.write("\x1b[?2004h")  # ask the terminal to wrap pastes in \x1b[200~..\x1b[201~

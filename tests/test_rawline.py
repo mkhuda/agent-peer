@@ -53,7 +53,7 @@ def _run_pty(write_sequence, timeout=6):
             while b"CHILD READY" not in buf and time.time() < deadline:
                 if select.select([master], [], [], 0.2)[0]:
                     buf += os.read(master, 4096)
-            time.sleep(0.4)  # settle time for tty.setcbreak() to actually engage
+            time.sleep(0.7)  # settle time for tty.setcbreak() to actually engage
 
             for item in write_sequence:
                 os.write(master, item)
@@ -141,3 +141,85 @@ def test_bracketed_paste_becomes_one_multi_line_message():
 def test_paste_joins_onto_already_typed_text():
     paste = b"\x1b[200~" + b"pasted" + b"\x1b[201~"
     assert "RESULT:'prefix-pasted'" in _run_pty([b"prefix-", paste, b"\r"])
+
+
+def test_paste_normalizes_crlf_line_endings():
+    """A Windows-clipboard-sourced paste can carry \\r\\n - a raw \\r left in
+    the buffer would move the cursor mid-render and visually corrupt the
+    line. Also locks in that ICRNL is disabled during raw mode: with it
+    left on, the kernel silently rewrites \\r to \\n before this code ever
+    sees it, turning \\r\\n into \\n\\n (an extra blank line) - normalizing
+    in paste_extend() alone cannot fix bytes that are already wrong by the
+    time they arrive."""
+    paste = b"\x1b[200~" + b"line A\r\nline B" + b"\x1b[201~"
+    assert "RESULT:'line A\\nline B'" in _run_pty([paste, b"\r"])
+
+
+def test_join_prints_a_permanent_card_for_the_message_you_just_sent():
+    """Real bug, caught live by three independent reports (the owner, `agy`,
+    `muse`) during hand-walk testing: raw mode's own render() clears the
+    typed line to redraw the prompt - unlike canonical input(), which the
+    terminal echoes on its own, nothing here ever printed the sent message
+    as a permanent line, so it visually vanished the instant Enter was
+    pressed. join.py must explicitly print the sent record's own card."""
+    import shutil
+    import tempfile
+
+    master, slave = pty.openpty()
+    home = tempfile.mkdtemp()
+    child_script = f"""
+import os, sys
+os.environ["HOME"] = {home!r}
+sys.path.insert(0, {REPO_ROOT!r})
+from agent_peer.join import run_join
+sys.stderr.write("CHILD READY\\n"); sys.stderr.flush()
+run_join("cardtest", "foreman")
+"""
+    pid = os.fork()
+    if pid == 0:
+        os.close(master)
+        os.setsid()
+        os.dup2(slave, 0)
+        os.dup2(slave, 1)
+        os.dup2(slave, 2)
+        os.close(slave)
+        os.execvp(sys.executable, [sys.executable, "-c", child_script])
+    else:
+        os.close(slave)
+        try:
+            buf = b""
+            deadline = time.time() + 6
+            while b"CHILD READY" not in buf and time.time() < deadline:
+                if select.select([master], [], [], 0.2)[0]:
+                    buf += os.read(master, 4096)
+            time.sleep(0.5)
+
+            os.write(master, b"hello this should stay visible")
+            time.sleep(0.1)
+            os.write(master, b"\r")
+            time.sleep(0.7)
+            os.write(master, b"\x04")  # Ctrl+D to leave
+            time.sleep(0.7)
+
+            out = b""
+            try:
+                while select.select([master], [], [], 0.4)[0]:
+                    chunk = os.read(master, 4096)
+                    if not chunk:
+                        break
+                    out += chunk
+            except OSError:
+                pass
+            for _ in range(30):
+                wpid, _status = os.waitpid(pid, os.WNOHANG)
+                if wpid != 0:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+            text = out.decode(errors="replace")
+            assert "hello this should stay visible" in text, text
+        finally:
+            os.close(master)
+            shutil.rmtree(home, ignore_errors=True)

@@ -145,6 +145,9 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
                 continue
             record = append_thread_message(thread_id, participant, text)
             last_seq_box[0] = max(last_seq_box[0], record["seq"])
+            if editor is not None:
+                editor.clear_rendered_area()
+            print(format_thread_entry(record, use_color=use_color, viewer=participant))
     finally:
         stop_event.set()
         poller.join(timeout=2)
