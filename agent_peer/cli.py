@@ -11,6 +11,7 @@ from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .thread import append_thread_message, wait_for_thread_message
+from .join import run_join
 from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
@@ -253,9 +254,22 @@ def cmd_wait(args):
     finally:
         compat.release_lock(lock_handle)
 
+def cmd_join(args):
+    """The human-facing one-door entry - invite (on a new thread, or
+    --invite) then a live two-way view. Agents keep using
+    'agent-peer thread <id>' instead; this needs a real TTY."""
+    participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
+    if not sys.stdin.isatty():
+        print("❌ 'agent-peer join' needs an interactive terminal. Agents should use 'agent-peer thread <id>' instead.", file=sys.stderr)
+        sys.exit(1)
+    run_join(args.thread_id, participant, invite=args.invite, all_scope=args.all)
+
 def cmd_thread(args):
     """Wait for unread messages on a shared thread, print them, exit 0 -
     mirrors cmd_wait's per-caller lock guard, pointed at shared state."""
+    if args.interactive:
+        cmd_join(args)
+        return
     timeout = args.timeout if args.timeout > 0 else None
     participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
@@ -455,7 +469,18 @@ def main():
     p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
+    p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
+    p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
+    p_thread.add_argument("-a", "--all", action="store_true", help="With --interactive: scope the invite picker mesh-wide instead of just this workspace")
     p_thread.set_defaults(func=cmd_thread)
+
+    # join - the human one-door entry: invite + live two-way view
+    p_join = subparsers.add_parser("join", help="Interactive live view of a shared thread for a human foreman - invites agents on a new thread, reads/sends in one screen")
+    p_join.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
+    p_join.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
+    p_join.add_argument("-I", "--invite", action="store_true", help="Always show the invite picker, even rejoining an existing thread")
+    p_join.add_argument("-a", "--all", action="store_true", help="Scope the invite picker mesh-wide instead of just this workspace")
+    p_join.set_defaults(func=cmd_join)
 
     # logs / log
     p_logs = subparsers.add_parser("logs", aliases=["log"], help="View formatted full message logs directly in terminal")
