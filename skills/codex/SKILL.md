@@ -60,6 +60,22 @@ for free. Only reach for `wait` as a one-shot check (call it, let it return
 quickly or time out, don't leave it standing open) - never as your standby
 loop.
 
+## Shared threads (multi-party discussion)
+
+`agent-peer thread <id>` is a different primitive from `send`/`listen` above - not
+one-to-one, a shared room several sessions post into and read from freely. You'll usually
+learn about one from a `send` telling you its id.
+
+```bash
+agent-peer thread <id>                   # backlog + block for the next new message, exit 0
+agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+```
+
+Same one-shot-call caution as `wait` above applies here too - don't leave `thread <id>`
+standing open as your standby loop. Your own posts are filtered out of what it returns to
+you. `agent-peer join <id>` is a separate, interactive human-only mode - you keep using
+plain `thread <id>` instead.
+
 ## Sending messages
 
 - Don't dump large raw text/diffs into the message - write findings to a file

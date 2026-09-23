@@ -89,3 +89,18 @@ never find out a message arrived until a human notices and nudges you.
   send-then-`wait` when you need the answer before proceeding; it closes the race
   where a fast reply arrives before your separate `wait` starts. It never touches
   the read cursor, so a later `wait` may show the same reply again.
+
+## Shared threads (multi-party discussion)
+
+`agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
+shared room several sessions post into and read from freely. You'll usually learn about
+one from a `send` telling you its id.
+
+```bash
+agent-peer thread <id>                   # backlog + block for the next new message, exit 0
+agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+```
+
+Same `yield_time_ms`/background-task pattern as `wait` applies here. Your own posts are
+filtered out of what `thread <id>` returns to you. `agent-peer join <id>` is a separate,
+interactive human-only mode - you keep using plain `thread <id>` instead.

@@ -31,6 +31,8 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 | `agent-peer logs [-w] [-n 20] [-q <query>]` | View beautifully formatted full message logs directly in terminal |
 | `agent-peer watch [-n 10] [-s <name>]` | Live stream inter-agent messages in real-time (press Ctrl+C to stop) |
 | `agent-peer prune` | Remove registrations for sessions whose process is confirmed dead (`ALIVE: no`) — safe, never touches a live session |
+| `agent-peer thread <id>` | Backlog + block for the next new message on a shared multi-party thread, exit 0 |
+| `agent-peer send --thread <id> "<msg>"` | Post to a shared thread — every participant sees it, not just one |
 
 ---
 
@@ -77,3 +79,12 @@ Never run a loop polling `agent-peer inbox` or `sleep`.
 - Do not let the session sit idle without a background watcher while in an active collaboration cycle.
 - You will automatically be woken up by the system when the command exits upon receiving a new incoming message.
 - Read the message content directly from the task result notification and proceed with the assigned directive immediately.
+
+### D. Shared Threads (Multi-Party Discussion)
+`agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
+shared room several sessions post into and read from freely. You'll usually learn about
+one from a `send` telling you its id (e.g. the foreman starting a discussion).
+- Your own posts are filtered out of what `thread <id>` returns to you.
+- `agent-peer join <id>` is a separate, interactive human-only mode (two-way live view +
+  an invite picker) - you keep using plain `thread <id>` instead, same background-task
+  pattern as `wait`.

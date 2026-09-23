@@ -29,6 +29,21 @@ handles that registration and delivery, `agent-peer` only reads/writes it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
 
+## Shared threads (multi-party discussion)
+
+`agent-peer thread <id>` is a different primitive from `send` above - not one-to-one, a
+shared room several sessions post into and read from freely. You'll usually learn about
+one from a `send` telling you its id.
+
+```bash
+agent-peer thread <id>                   # backlog + block for the next new message, exit 0
+agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+```
+
+Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
+<id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -
+you keep using plain `thread <id>` instead.
+
 ## Talking to a non-Claude peer
 
 Codex has native push too (via `codex queue`, once it's run `agent-peer
