@@ -71,13 +71,21 @@ def pick_multi(items, title, render_item_fn, get_id_fn, preselected=None):
         cursor = 0
         while True:
             stdscr.clear()
-            stdscr.addstr(0, 0, title)
-            stdscr.addstr(1, 0, "[Space] toggle  [Enter] confirm  [a] all  [n] none  [q] cancel")
+            try:
+                stdscr.addstr(0, 0, title)
+                stdscr.addstr(1, 0, "[Space] toggle  [Enter] confirm  [a] all  [n] none  [q] cancel")
+            except curses.error:
+                pass  # terminal shorter than 2 lines - keep the picker usable, don't crash
             for i, item in enumerate(items):
+                if i + 3 >= curses.LINES - 1:
+                    break  # more items than the terminal has rows for - scroll offset is future work
                 mark = "[x]" if get_id_fn(item) in checked else "[ ]"
                 line = f"{mark} {render_item_fn(item)}"
                 attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
-                stdscr.addstr(i + 3, 0, line[: curses.COLS - 1], attr)
+                try:
+                    stdscr.addstr(i + 3, 0, line[: curses.COLS - 1], attr)
+                except curses.error:
+                    pass
             key = stdscr.getch()
             if key == ord(" "):
                 checked.symmetric_difference_update({get_id_fn(items[cursor])})

@@ -114,8 +114,10 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
         print(header)
     print("Type a message and press Enter to send. Ctrl+D to leave.\n")
     for r in backlog:
-        if r.get("from") != participant:
-            print(format_thread_entry(r, use_color=use_color))
+        # unlike _poll_loop, backlog is full history - self-echo suppression
+        # there only hides what your own live typing already echoed locally,
+        # a rejoin has no such echo and must show everything
+        print(format_thread_entry(r, use_color=use_color))
 
     last_seq_box = [backlog[-1]["seq"] if backlog else 0]
     stop_event = threading.Event()

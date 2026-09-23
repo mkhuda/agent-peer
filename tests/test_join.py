@@ -103,6 +103,17 @@ def test_run_join_prints_backlog_sends_lines_and_exits_on_eof():
         assert records[-1]["content"] == "hello from foreman"
 
 
+def test_rejoin_shows_the_foremans_own_past_messages_in_backlog():
+    """Backlog is full history, not a live feed - self-echo suppression only
+    belongs in the poll loop (what you just typed is already visible from
+    your own terminal echo); a REJOIN has no such echo to rely on."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "my own first message", "--sender", "foreman"], home)
+        result = _run_join_piped(home, "sync", "foreman", "\n")
+        assert result.returncode == 0, result.stderr
+        assert "my own first message" in result.stdout
+
+
 def test_run_join_does_not_echo_its_own_posted_message_via_the_poller():
     """A real terminal already echoes what you typed - piped stdin (this
     test's harness) doesn't, so the only way this text could appear in

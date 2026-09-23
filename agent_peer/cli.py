@@ -258,7 +258,10 @@ def cmd_join(args):
     """The human-facing one-door entry - invite (on a new thread, or
     --invite) then a live two-way view. Agents keep using
     'agent-peer thread <id>' instead; this needs a real TTY."""
-    participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
+    # A human typing this directly (not inside an AI harness) has no
+    # detectable harness identity - fall back to the OS username rather
+    # than auto_session_name()'s harness-derived "agent-<pid>".
+    participant = args.name or os.environ.get("AGENT_PEER_NAME") or compat.current_username() or auto_session_name()
     if not sys.stdin.isatty():
         print("❌ 'agent-peer join' needs an interactive terminal. Agents should use 'agent-peer thread <id>' instead.", file=sys.stderr)
         sys.exit(1)
