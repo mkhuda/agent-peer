@@ -17,6 +17,7 @@ INBOX_FILE = os.path.join(AGENT_PEER_DIR, "inbox.jsonl")
 INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
 CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
 LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
+THREADS_DIR = os.path.join(AGENT_PEER_DIR, "threads")
 
 def atomic_write_json(path: str, data) -> None:
     """Write via a temp file + os.replace() - a concurrent reader (another
@@ -31,7 +32,7 @@ def ensure_dirs():
     # belong to Claude Code's own protocol. secure_dir() only runs on first
     # creation (icacls spawns a process on Windows - this fn is called on
     # every message, so redoing it every time was the real hot-path cost).
-    for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR):
+    for d in (AGENT_PEER_DIR, INBOXES_DIR, CURSORS_DIR, LOCKS_DIR, THREADS_DIR):
         existed = os.path.isdir(d)
         os.makedirs(d, exist_ok=True)
         if not existed:
@@ -53,6 +54,22 @@ def get_lock_path(session_id_or_name: str = None) -> str:
     ensure_dirs()
     key = str(session_id_or_name) if session_id_or_name else "_global"
     return os.path.join(LOCKS_DIR, f"{key}.lock")
+
+def get_thread_path(thread_id: str) -> str:
+    ensure_dirs()
+    return os.path.join(THREADS_DIR, f"{thread_id}.jsonl")
+
+def get_thread_lock_path(thread_id: str) -> str:
+    ensure_dirs()
+    return os.path.join(THREADS_DIR, f"{thread_id}.lock")
+
+def get_thread_cursor_path(thread_id: str, participant: str) -> str:
+    ensure_dirs()
+    return os.path.join(CURSORS_DIR, f"thread.{thread_id}.{participant}.json")
+
+def get_thread_presence_path(thread_id: str) -> str:
+    ensure_dirs()
+    return os.path.join(THREADS_DIR, f"{thread_id}.presence.json")
 
 def get_harness_cwd(pid: int):
     """The harness process's OWN cwd (tracked by the OS), not the cwd of

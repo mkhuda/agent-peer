@@ -10,6 +10,7 @@ from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
+from .thread import append_thread_message, wait_for_thread_message
 from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
@@ -101,6 +102,22 @@ def cmd_prune(args):
 
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
+
+    if args.thread:
+        if args.target is not None:
+            print("❌ --thread takes the message as the sole positional argument - don't also pass a target.", file=sys.stderr)
+            sys.exit(1)
+        if not args.message.strip():
+            print("❌ Message is empty.", file=sys.stderr)
+            sys.exit(1)
+        record = append_thread_message(args.thread, sender, args.message)
+        print(f"✅ Posted to thread '{args.thread}' as seq {record['seq']} (from {sender})")
+        return
+
+    if args.target is None:
+        print("❌ Missing target: 'agent-peer send <target> <message>', or 'agent-peer send --thread <id> <message>'.", file=sys.stderr)
+        sys.exit(1)
+
     # Captured before delivery so a fast reply can never predate the baseline.
     sent_at = time.time()
     try:
@@ -232,6 +249,31 @@ def cmd_wait(args):
             sys.exit(0)
         else:
             print("Timeout waiting for message.")
+            sys.exit(1)
+    finally:
+        compat.release_lock(lock_handle)
+
+def cmd_thread(args):
+    """Wait for unread messages on a shared thread, print them, exit 0 -
+    mirrors cmd_wait's per-caller lock guard, pointed at shared state."""
+    timeout = args.timeout if args.timeout > 0 else None
+    participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
+
+    lock_path = get_lock_path(f"thread.{args.thread_id}.{participant}")
+    lock_handle = compat.acquire_lock(lock_path)
+    if lock_handle is None:
+        print(f"❌ 'agent-peer thread {args.thread_id}' for '{participant}' is already running in another process. Close the old one before starting a new one.", file=sys.stderr)
+        sys.exit(1)
+    compat.secure_file(lock_path)
+
+    try:
+        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout)
+        if msgs:
+            for msg in msgs:
+                print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}]: {msg.get('content')}")
+            sys.exit(0)
+        else:
+            print("Timeout waiting for a thread message.")
             sys.exit(1)
     finally:
         compat.release_lock(lock_handle)
@@ -369,11 +411,12 @@ def main():
 
     # send
     p_send = subparsers.add_parser("send", help="Send a real-time message to a session")
-    p_send.add_argument("target", help="Target session name or PID (e.g. projects-00, fe, 22748)")
+    p_send.add_argument("target", nargs="?", default=None, help="Target session name or PID (e.g. projects-00, fe, 22748) - omit when using --thread")
     p_send.add_argument("message", help="Message text to send")
     p_send.add_argument("--priority", choices=["now", "next", "later"], default="now", help="Delivery priority (default: now)")
     p_send.add_argument("--sender", default=None, help="Sender identity name (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
     p_send.add_argument("--await-reply", nargs="?", const=0.0, default=None, type=float, metavar="SECONDS", help="After delivering, block until the target replies (first message from them past send-time, exit 0) or the timeout lapses (exit 1). Bare flag waits indefinitely; does not consume the read cursor.")
+    p_send.add_argument("--thread", default=None, metavar="ID", help="Post to a shared thread instead of one recipient - every participant running 'agent-peer thread <ID>' sees it. No target positional with this flag.")
     p_send.set_defaults(func=cmd_send)
 
     # listen
@@ -396,6 +439,13 @@ def main():
     p_wait.add_argument("--name", "--session", dest="session", default=None, help="Wait specifically for messages sent to this session name or PID (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
     p_wait.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
     p_wait.set_defaults(func=cmd_wait)
+
+    # thread - shared multi-party discussion
+    p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time")
+    p_thread.add_argument("thread_id", help="Thread name (e.g. ottoshare-sync) - shared by everyone who posts/waits on it, nothing to create first")
+    p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
+    p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
+    p_thread.set_defaults(func=cmd_thread)
 
     # logs / log
     p_logs = subparsers.add_parser("logs", aliases=["log"], help="View formatted full message logs directly in terminal")
