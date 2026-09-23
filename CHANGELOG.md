@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2
+
+- **Fixed: a session could vanish from `list`/`send` even with no concurrent write happening.**
+  A native Claude Code session's own registry file (`~/.claude/sessions/<pid>.json`) was found with
+  a literal extra trailing `}` - confirmed persistent (5/5 consistent reads, no writer active during
+  the window), not a race, and not written by agent-peer's own code. `get_active_sessions()` now
+  falls back to `JSONDecoder().raw_decode()` to recover the leading valid object when `json.loads()`
+  rejects trailing garbage, instead of dropping the session entirely.
+
 ## 0.5.1
 
 - **Fixed: a genuine race could make a session invisible to `send`/`list` while it was actively
