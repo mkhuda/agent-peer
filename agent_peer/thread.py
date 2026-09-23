@@ -1,7 +1,8 @@
 import os
 import json
+import threading
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from .protocol import (
     get_thread_path,
@@ -10,7 +11,14 @@ from .protocol import (
     get_thread_lock_path,
     ensure_dirs,
 )
+from .sender import send_message
 from . import compat
+
+# A presence older than this is somebody who wandered off, not an active
+# participant - fanout skips them (0028 Open Q1: spec suggests 5 minutes).
+PRESENCE_ACTIVE_SECONDS = 300
+# Total wall-time budget for one fanout across all concurrent workers.
+FANOUT_BUDGET_SECONDS = 0.2
 
 
 def _secure(path: str):
@@ -74,7 +82,66 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
         _secure(path)
     finally:
         compat.release_lock(lock_handle)
+    # Append-first, push-second (Invariant #1): the record is already safe
+    # on disk here, so the fanout below can only ever fail silently.
+    fanout_thread_push(thread_id, record["seq"], sender, content)
     return record
+
+
+def fanout_targets(thread_id: str, sender: str) -> List[Tuple[str, int]]:
+    """Active presence entries eligible for a native push: not the sender,
+    not this process, seen recently. Resolved by name at push time (the
+    presence pid is the waiter/join process, never a registered session)."""
+    now = time.time()
+    targets = []
+    for name, info in read_thread_presence(thread_id).items():
+        if not isinstance(info, dict):
+            continue
+        pid = info.get("pid")
+        if name == sender or pid == os.getpid():
+            continue
+        if not isinstance(pid, int):
+            continue
+        if now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+            continue
+        targets.append((name, pid))
+    return targets
+
+
+def _push_one(name: str, pid: int, frame: str, sender: str):
+    # Name first: presence pids belong to waiter/join processes, which are
+    # never registered sessions - only the participant's listener is, and it
+    # registers under this same name by convention. PID is a free fallback.
+    for target in (name, str(pid)):
+        try:
+            send_message(target, frame, from_name=sender)
+            return
+        except Exception:
+            continue  # a dead/unreachable target must never fail the poster
+
+
+def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
+    """Best-effort native wake for active participants. Daemon workers plus
+    a bounded main-thread wait: a hung socket can delay a post by at most
+    FANOUT_BUDGET_SECONDS and can never wedge interpreter exit. Never raises."""
+    try:
+        targets = fanout_targets(thread_id, sender)
+        if not targets:
+            return
+        frame = f"[thread: {thread_id} #{seq} from {sender}]: {content}"
+        workers = []
+        for name, pid in targets:
+            worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender), daemon=True)
+            worker.start()
+            workers.append(worker)
+        deadline = time.time() + FANOUT_BUDGET_SECONDS
+        for worker in workers:
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            worker.join(timeout=remaining)
+    except Exception:
+        pass
 
 
 def read_thread(thread_id: str, limit: Optional[int] = None) -> List[Dict[str, Any]]:
