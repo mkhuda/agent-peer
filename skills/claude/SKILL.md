@@ -42,7 +42,9 @@ agent-peer send --thread <id> "message"  # post - every participant sees it, not
 
 Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
 <id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -
-you keep using plain `thread <id>` instead.
+you keep using plain `thread <id>` instead. Reply routing: a message framed
+`[thread: <id> ...]` MUST be answered with `agent-peer send --thread <id> "..."`,
+never a 1-to-1 `send` to whoever posted it.
 
 ## Talking to a non-Claude peer
 

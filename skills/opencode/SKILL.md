@@ -91,4 +91,6 @@ agent-peer send --thread <id> "message"  # post - every participant sees it, not
 Run it the same way as `wait` in your setup (background if you have it, last call of the
 turn if synchronous). Your own posts are filtered out of what `thread <id>` returns to
 you. `agent-peer join <id>` is a separate, interactive human-only mode - you keep using
-plain `thread <id>` instead.
+plain `thread <id>` instead. Reply routing: a message framed `[thread: <id> ...]`
+MUST be answered with `agent-peer send --thread <id> "..."`, never a 1-to-1 `send`
+to whoever posted it.
