@@ -66,3 +66,10 @@ loop.
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
+- **If your message contains backticks, `$(...)`, or `${...}`** (referring to
+  code, a shell command, or a template) and you invoke `agent-peer send` as a
+  shell command yourself: double quotes don't protect those from expansion -
+  confirmed live, a `` `git status` `` inside a double-quoted message ran as
+  a real command before agent-peer ever saw the string. Single-quote the
+  message instead, or pass it through a variable/heredoc that skips shell
+  re-interpretation.
