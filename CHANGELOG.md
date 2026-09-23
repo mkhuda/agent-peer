@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.5.1
+
+- **Fixed: a genuine race could make a session invisible to `send`/`list` while it was actively
+  receiving messages.** Every session status update (`listener.py`'s new-message/idle transitions,
+  `cli.py`'s post-`wait` idle reset) wrote its JSON file with `open(path, "w")` + `json.dump()` -
+  which truncates the file before writing. A concurrent reader (another session's `list` or `send`)
+  landing in that window saw a corrupt/empty file, which `get_active_sessions()` silently dropped
+  from its results - "Active sessions: None" even though the target was genuinely alive and busy.
+  Reproduced live: 770 corrupt reads out of 300 writes under concurrent access; 0 after the fix.
+  Every session JSON write now goes through `agent_peer.protocol.atomic_write_json()` (temp file +
+  `os.replace()`, atomic on both POSIX and Windows).
+- Confirmed live and documented in `skills/codex/SKILL.md`: message content with backticks/`$()`/
+  `${...}` is safe over the wire (`agent-peer`'s own JSON framing never reinterprets it) - but a
+  caller invoking `agent-peer send` through a double-quoted shell string can still have the *shell
+  itself* expand those before agent-peer ever sees the argument. Single-quote the message instead.
+
 ## 0.5.0
 
 Native Windows support - `agent-peer` now runs directly on Windows, no WSL needed. Every
