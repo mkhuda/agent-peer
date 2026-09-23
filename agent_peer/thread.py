@@ -206,6 +206,33 @@ def touch_thread_presence(thread_id: str, participant: str):
         compat.release_lock(lock_handle)
 
 
+def leave_thread_presence(thread_id: str, participant: str) -> bool:
+    """Step out of the meeting: drop the presence entry so fanout skips
+    this participant. The cursor is deliberately left alone - rejoining
+    (`agent-peer thread <id>`) re-touches presence and replays everything
+    past last_seq as catch-up. Returns True if an entry was removed."""
+    path = get_thread_presence_path(thread_id)
+    lock_path = get_thread_lock_path(thread_id) + ".presence"
+    lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
+    if lock_handle is None:
+        return False
+    try:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                presence = json.load(f)
+        except Exception:
+            return False
+        if participant not in presence:
+            return False
+        del presence[participant]
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(presence, f)
+        _secure(path)
+        return True
+    finally:
+        compat.release_lock(lock_handle)
+
+
 def read_thread_presence(thread_id: str) -> Dict[str, Any]:
     path = get_thread_presence_path(thread_id)
     if not os.path.exists(path):
