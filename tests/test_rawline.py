@@ -127,3 +127,17 @@ def test_ctrl_c_returns_none_instead_of_crashing():
 
 def test_ctrl_d_on_an_empty_buffer_returns_none():
     assert "RESULT:None" in _run_pty([b"\x04"])
+
+
+def test_bracketed_paste_becomes_one_multi_line_message():
+    """A terminal that supports bracketed paste wraps pasted text in
+    \\x1b[200~..\\x1b[201~ - the whole block must land as one composed
+    message (still submitted by an explicit Enter), not one submit per
+    embedded newline (which would spam the thread with N messages)."""
+    paste = b"\x1b[200~" + b"line A\nline B\nline C" + b"\x1b[201~"
+    assert "RESULT:'line A\\nline B\\nline C'" in _run_pty([paste, b"\r"])
+
+
+def test_paste_joins_onto_already_typed_text():
+    paste = b"\x1b[200~" + b"pasted" + b"\x1b[201~"
+    assert "RESULT:'prefix-pasted'" in _run_pty([b"prefix-", paste, b"\r"])

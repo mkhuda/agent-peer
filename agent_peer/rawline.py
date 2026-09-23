@@ -41,6 +41,17 @@ class LineEditor:
     def newline(self):
         self.lines.append("")
 
+    def paste_extend(self, pasted_text: str):
+        """Inserts a (possibly multi-line) pasted block into the buffer -
+        its first line joins whatever was already typed, each subsequent
+        line becomes its own continuation. Never submits on its own; the
+        whole paste still lands in the compose box for an explicit Enter."""
+        paste_lines = pasted_text.split("\n")
+        self.lines[-1] += paste_lines[0]
+        for extra in paste_lines[1:]:
+            self.newline()
+            self.lines[-1] = extra
+
     def render(self):
         """Redraws the whole composition from its own top line - moves the
         cursor up past any extra lines printed by the previous render, then
@@ -57,8 +68,9 @@ class LineEditor:
 
 def _read_escape_sequence(fd, timeout=0.05):
     """Called right after a bare ESC byte. Returns "ENTER" for Alt+Enter
-    (\\x1b\\r) or CSI-u Shift+Enter (\\x1b[13;2u), None for a standalone Esc
-    or any other/unrecognized sequence (e.g. arrow keys - ignored for now)."""
+    (\\x1b\\r) or CSI-u Shift+Enter (\\x1b[13;2u), "PASTE_START" for a
+    bracketed-paste begin marker (\\x1b[200~), None for a standalone Esc or
+    any other/unrecognized sequence (e.g. arrow keys - ignored for now)."""
     import select
 
     if not select.select([fd], [], [], timeout)[0]:
@@ -74,7 +86,33 @@ def _read_escape_sequence(fd, timeout=0.05):
         seq += c
         if c.isalpha() or c == "~":
             break
-    return "ENTER" if seq == "13;2u" else None
+    if seq == "13;2u":
+        return "ENTER"
+    if seq == "200~":
+        return "PASTE_START"
+    return None
+
+
+def _consume_bracketed_paste(fd, timeout=2.0) -> str:
+    """Called right after a PASTE_START marker - reads literal bytes until
+    the matching \\x1b[201~ end marker, returning everything in between.
+    A generous overall timeout is the safety net if a terminal ever sends
+    a start marker without a matching end (should not happen in practice)."""
+    import select
+    import time
+
+    end_marker = "\x1b[201~"
+    buf = ""
+    deadline = time.time() + timeout
+    while not buf.endswith(end_marker):
+        if not select.select([fd], [], [], 0.2)[0]:
+            if time.time() > deadline:
+                break
+            continue
+        buf += os.read(fd, 4096).decode(errors="replace")
+    if buf.endswith(end_marker):
+        buf = buf[: -len(end_marker)]
+    return buf
 
 
 def _read_posix(editor: LineEditor):
@@ -91,6 +129,8 @@ def _read_posix(editor: LineEditor):
         mode = termios.tcgetattr(fd)
         mode[3] &= ~termios.ISIG
         termios.tcsetattr(fd, termios.TCSANOW, mode)
+        sys.stdout.write("\x1b[?2004h")  # ask the terminal to wrap pastes in \x1b[200~..\x1b[201~
+        sys.stdout.flush()
         while True:
             ch = os.read(fd, 1).decode(errors="replace")
             if ch == "\x03":  # Ctrl+C
@@ -100,8 +140,11 @@ def _read_posix(editor: LineEditor):
                     return None
                 continue  # mid-composition EOF - ignored, not a submit
             if ch == "\x1b":
-                if _read_escape_sequence(fd) == "ENTER":
+                marker = _read_escape_sequence(fd)
+                if marker == "ENTER":
                     editor.newline()
+                elif marker == "PASTE_START":
+                    editor.paste_extend(_consume_bracketed_paste(fd))
                 else:
                     editor.reset()
                 editor.render()
@@ -121,6 +164,8 @@ def _read_posix(editor: LineEditor):
                 editor.append_char(ch)
                 editor.render()
     finally:
+        sys.stdout.write("\x1b[?2004l")
+        sys.stdout.flush()
         termios.tcsetattr(fd, termios.TCSADRAIN, old)
 
 

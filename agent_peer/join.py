@@ -148,4 +148,4 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     finally:
         stop_event.set()
         poller.join(timeout=2)
-        print("\nLeft the thread.")
+        print(f"\nLeft the thread. To rejoin, run: agent-peer join {thread_id}")
