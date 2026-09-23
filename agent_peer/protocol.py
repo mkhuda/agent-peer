@@ -18,6 +18,14 @@ INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
 CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
 LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 
+def atomic_write_json(path: str, data) -> None:
+    """Write via a temp file + os.replace() - a concurrent reader (another
+    process's 'list'/'send') never sees a truncated/partial file mid-write."""
+    tmp_path = f"{path}.tmp.{os.getpid()}"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f)
+    os.replace(tmp_path, path)
+
 def ensure_dirs():
     # Only our own directories are locked down - SOCKET_DIR/SESSIONS_DIR
     # belong to Claude Code's own protocol. secure_dir() only runs on first

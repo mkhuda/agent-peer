@@ -21,7 +21,8 @@ from .protocol import (
     get_proc_start,
     generate_peer_token,
     generate_key_filename,
-    harness_session_uid
+    harness_session_uid,
+    atomic_write_json,
 )
 from .inbox import append_inbox, mark_session_start
 from . import compat
@@ -162,8 +163,7 @@ class PeerListener:
             session_data["codexThreadId"] = self.codex_thread_id
         if self.harness_uid:
             session_data["harnessSessionUid"] = self.harness_uid
-        with open(self.json_path, "w", encoding="utf-8") as f:
-            json.dump(session_data, f)
+        atomic_write_json(self.json_path, session_data)
 
         # accept() only starts after setup() returns, so this cursor baseline
         # is always earlier than any message this session will actually see.
@@ -282,8 +282,7 @@ class PeerListener:
                 meta["status"] = "new-msg"
                 meta["updatedAt"] = int(time.time() * 1000)
                 meta["statusUpdatedAt"] = int(time.time() * 1000)
-                with open(self.json_path, "w", encoding="utf-8") as f:
-                    json.dump(meta, f)
+                atomic_write_json(self.json_path, meta)
         except Exception:
             pass
 

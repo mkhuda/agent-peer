@@ -14,7 +14,7 @@ from .logs import show_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
 from .codex_status import format_codex_status, get_codex_status_dict
-from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, SESSIONS_DIR, SOCKET_DIR
+from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, atomic_write_json, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
 from . import harness_detect, setup_tui, update_check
@@ -198,8 +198,7 @@ def _reset_status_idle(session: str):
             meta = json.load(f)
         meta["status"] = "idle"
         meta["statusUpdatedAt"] = int(time.time() * 1000)
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(meta, f)
+        atomic_write_json(json_path, meta)
     except Exception:
         pass
 
