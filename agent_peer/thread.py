@@ -12,6 +12,7 @@ from .protocol import (
     ensure_dirs,
 )
 from .sender import send_message
+from .registry import get_active_sessions
 from . import compat
 
 # A presence older than this is somebody who wandered off, not an active
@@ -88,11 +89,27 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
     return record
 
 
-def fanout_targets(thread_id: str, sender: str) -> List[Tuple[str, int]]:
+def _mentions(content: str, name: str) -> bool:
+    return f"@{name}" in content or "@all" in content or "[stop]" in content
+
+
+def _session_busy(sessions, name: str, pid: int) -> bool:
+    for session in sessions:
+        if session.get("name") == name or session.get("pid") == pid:
+            return session.get("status") == "busy"
+    return False
+
+
+def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str, int]]:
     """Active presence entries eligible for a native push: not the sender,
     not this process, seen recently. Resolved by name at push time (the
-    presence pid is the waiter/join process, never a registered session)."""
+    presence pid is the waiter/join process, never a registered session).
+    A busy participant is only pushed on @name/@all/[stop] (anti-bombing)."""
     now = time.time()
+    try:
+        sessions = get_active_sessions()
+    except Exception:
+        sessions = []
     targets = []
     for name, info in read_thread_presence(thread_id).items():
         if not isinstance(info, dict):
@@ -103,6 +120,8 @@ def fanout_targets(thread_id: str, sender: str) -> List[Tuple[str, int]]:
         if not isinstance(pid, int):
             continue
         if now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+            continue
+        if _session_busy(sessions, name, pid) and not _mentions(content, name):
             continue
         targets.append((name, pid))
     return targets
@@ -125,7 +144,7 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
     a bounded main-thread wait: a hung socket can delay a post by at most
     FANOUT_BUDGET_SECONDS and can never wedge interpreter exit. Never raises."""
     try:
-        targets = fanout_targets(thread_id, sender)
+        targets = fanout_targets(thread_id, sender, content)
         if not targets:
             return
         frame = f"[thread: {thread_id} #{seq} from {sender}]: {content}"
