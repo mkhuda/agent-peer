@@ -6,6 +6,7 @@ Falls back to plain input() when stdin isn't a real tty (tests, pipes) -
 same guard shape as picker.py's isatty() check."""
 
 import os
+import shutil
 import sys
 
 from . import compat
@@ -21,7 +22,22 @@ class LineEditor:
     def __init__(self, prompt="> "):
         self.prompt = prompt
         self.lines = [""]
-        self._printed_extra_lines = 0
+        self._printed_visual_rows = 0
+
+    def _visual_rows(self) -> int:
+        """Physical terminal rows the current buffer occupies, accounting
+        for the terminal soft-wrapping a line wider than its column count -
+        clear_rendered_area() must move the cursor up past ALL of these, not
+        just past explicit newlines, or a long line leaves behind a trail of
+        duplicated prompts (a real bug, caught live: every keystroke past
+        the wrap point kept printing a new physical row instead of
+        overwriting the wrapped one)."""
+        cols = shutil.get_terminal_size((80, 24)).columns or 80
+        total = 0
+        for i, line in enumerate(self.lines):
+            prefix_len = len(self.prompt) if i == 0 else len(CONTINUATION_PREFIX)
+            total += max(1, -(-(prefix_len + len(line)) // cols))  # ceiling division
+        return total
 
     def text(self) -> str:
         return "\n".join(self.lines)
@@ -54,26 +70,27 @@ class LineEditor:
             self.lines[-1] = extra
 
     def clear_rendered_area(self):
-        """Erases whatever this editor last drew (cursor up past any extra
-        lines, then clear to end of screen), without printing anything back
-        - for a caller that wants to print something permanent (a sent
-        message's own card) in that same screen space instead."""
-        if self._printed_extra_lines:
-            sys.stdout.write(f"\033[{self._printed_extra_lines}A")
+        """Erases whatever this editor last drew (cursor up past every
+        physical row it occupied - explicit newlines AND soft-wrapped ones -
+        then clear to end of screen), without printing anything back - for a
+        caller that wants to print something permanent (a sent message's own
+        card) in that same screen space instead."""
+        if self._printed_visual_rows > 1:
+            sys.stdout.write(f"\033[{self._printed_visual_rows - 1}A")
         sys.stdout.write("\r\033[J")
         sys.stdout.flush()
-        self._printed_extra_lines = 0
+        self._printed_visual_rows = 0
 
     def render(self):
         """Redraws the whole composition from its own top line - moves the
-        cursor up past any extra lines printed by the previous render, then
-        clears everything below and reprints."""
+        cursor up past every physical row printed by the previous render,
+        then clears everything below and reprints."""
         self.clear_rendered_area()
         sys.stdout.write(self.prompt + self.lines[0])
         for extra in self.lines[1:]:
             sys.stdout.write("\n" + CONTINUATION_PREFIX + extra)
         sys.stdout.flush()
-        self._printed_extra_lines = len(self.lines) - 1
+        self._printed_visual_rows = self._visual_rows()
 
 
 def _read_escape_sequence(fd, timeout=0.05):

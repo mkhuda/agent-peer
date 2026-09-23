@@ -16,6 +16,8 @@ import time
 
 import pytest
 
+from agent_peer.rawline import LineEditor
+
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _CHILD_SCRIPT = f"""
@@ -81,6 +83,38 @@ def _run_pty(write_sequence, timeout=6):
             return out.decode(errors="replace")
         finally:
             os.close(master)
+
+
+def test_visual_rows_counts_soft_wrap_not_just_explicit_newlines(monkeypatch):
+    """Real bug, caught live from a screenshot: clear_rendered_area() used
+    to only count explicit '\\n's (len(self.lines) - 1), so a single long
+    line that the terminal soft-wraps across several physical rows was
+    always treated as 1 row - the cursor never moved up far enough to
+    overwrite it, and every keystroke past the wrap point printed a whole
+    new duplicate prompt below the last one (dozens of stacked '> ...'
+    lines in the screenshot). No pty can observe soft-wrap directly (a bare
+    pty doesn't render/wrap - a real terminal emulator does, and no
+    terminal-emulation library is available without adding a dependency),
+    so this tests the row-counting arithmetic directly instead."""
+    import agent_peer.rawline as rawline_mod
+
+    monkeypatch.setattr(rawline_mod.shutil, "get_terminal_size", lambda fallback=(80, 24): os.terminal_size((80, 24)))
+    e = LineEditor("> ")
+
+    e.lines = ["x" * 30]
+    assert e._visual_rows() == 1
+
+    e.lines = ["x" * 78]  # + 2-char prompt "> " = exactly 80 -> still 1 row
+    assert e._visual_rows() == 1
+
+    e.lines = ["x" * 79]  # + prompt = 81 -> wraps to a 2nd row
+    assert e._visual_rows() == 2
+
+    e.lines = ["x" * 180]  # + prompt = 182 -> ceil(182/80) = 3 rows
+    assert e._visual_rows() == 3
+
+    e.lines = ["first line", "x" * 100]  # continuation line also wraps on its own
+    assert e._visual_rows() == 1 + 2  # "... " (4) + 100 = 104 -> ceil(104/80) = 2
 
 
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="pty is POSIX-only; rawline's Windows path uses msvcrt instead")
