@@ -140,9 +140,21 @@ def harness_session_uid() -> Optional[str]:
     return None
 
 def auto_session_name() -> str:
-    """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'."""
+    """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'.
+    If the detected harness pid already has a live registered session
+    (e.g. it ran `listen --name foo`), reuse that official name so every
+    command agrees on one identity instead of inventing `<harness>-<pid>`
+    (0028 fix #1). Lazy registry import: registry imports this module."""
     name, pid = detect_harness_identity()
     if name:
+        try:
+            from .registry import get_active_sessions
+
+            for session in get_active_sessions():
+                if session.get("pid") == pid and session.get("alive", True):
+                    return session.get("name") or f"{name}-{pid}"
+        except Exception:
+            pass
         return f"{name}-{pid}"
     return f"agent-{os.getpid()}"
 

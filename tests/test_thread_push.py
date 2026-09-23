@@ -157,5 +157,49 @@ class ThreadPushTest(unittest.TestCase):
             self.assertIn("MUST be answered", text, harness)
 
 
+class AutoNameFixOneTest(unittest.TestCase):
+    """0028 fix #1: auto_session_name reuses the registered name when the
+    detected harness pid has a live session (in-process with patched
+    bindings; protocol binds DIRS at import so subprocess is unnecessary)."""
+
+    def setUp(self):
+        import tempfile
+
+        from agent_peer import protocol, registry
+
+        self.protocol = protocol
+        self.registry = registry
+        self._tmp = tempfile.TemporaryDirectory(prefix="agent-peer-sessions-")
+        self._orig_sessions = protocol.SESSIONS_DIR
+        self._orig_detect = protocol.detect_harness_identity
+        # Both modules bound SESSIONS_DIR at import; patch both.
+        protocol.SESSIONS_DIR = self._tmp.name
+        registry.SESSIONS_DIR = self._tmp.name
+
+    def tearDown(self):
+        self.protocol.SESSIONS_DIR = self._orig_sessions
+        self.registry.SESSIONS_DIR = self._orig_sessions
+        self.protocol.detect_harness_identity = self._orig_detect
+        self._tmp.cleanup()
+
+    def _register(self, pid, name):
+        with open(os.path.join(self._tmp.name, f"{pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": name}, fh)
+
+    def test_registered_live_pid_returns_official_name(self):
+        self._register(os.getpid(), "agent-peer-e4")
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", os.getpid())
+        self.assertEqual(self.protocol.auto_session_name(), "agent-peer-e4")
+
+    def test_dead_registration_falls_back_to_invented(self):
+        self._register(999999, "agent-peer-e4")
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", 999999)
+        self.assertEqual(self.protocol.auto_session_name(), "claude-999999")
+
+    def test_unregistered_falls_back_to_invented(self):
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", 999998)
+        self.assertEqual(self.protocol.auto_session_name(), "claude-999998")
+
+
 if __name__ == "__main__":
     unittest.main()
