@@ -44,7 +44,9 @@ Your own posts are filtered out of what `thread <id>` returns to you. `agent-pee
 <id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -
 you keep using plain `thread <id>` instead. Reply routing: a message framed
 `[thread: <id> ...]` MUST be answered with `agent-peer send --thread <id> "..."`,
-never a 1-to-1 `send` to whoever posted it.
+never a 1-to-1 `send` to whoever posted it. New to a thread? Read its backlog once
+first (`agent-peer thread <id>` or `agent-peer logs --thread <id>`) - a native push
+carries only the newest message, never history.
 
 ## Talking to a non-Claude peer
 
