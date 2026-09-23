@@ -1,0 +1,129 @@
+"""rawline.py's raw/cbreak multi-line editor - verified against a REAL
+pseudo-terminal (not just checked for exceptions), since terminal input
+behavior (ICRNL translation, ISIG signal interception) only shows up under
+an actual pty, not a piped stdin. Two real bugs were caught this way before
+landing: Alt+Enter mis-detected as a plain Esc-clear because ICRNL can
+translate \\r to \\n before the byte ever reaches us, and Ctrl+C crashing
+the process instead of returning None because ISIG was left enabled (the
+kernel intercepted it as a real SIGINT instead of delivering byte 0x03)."""
+
+import os
+import pty
+import select
+import signal
+import sys
+import time
+
+import pytest
+
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+_CHILD_SCRIPT = f"""
+import sys
+sys.path.insert(0, {REPO_ROOT!r})
+from agent_peer.rawline import LineEditor, read_message
+sys.stderr.write("CHILD READY\\n"); sys.stderr.flush()
+editor = LineEditor("> ")
+result = read_message(editor)
+sys.stdout.write("\\nRESULT:" + repr(result) + "\\n")
+sys.stdout.flush()
+"""
+
+
+def _run_pty(write_sequence, timeout=6):
+    """Spawns a real pty, waits for the child to actually reach cbreak mode
+    (not a fixed sleep - a race with import time is exactly how this test
+    was flaky before), sends `write_sequence`, and returns the captured
+    output text."""
+    master, slave = pty.openpty()
+    pid = os.fork()
+    if pid == 0:
+        os.close(master)
+        os.setsid()
+        os.dup2(slave, 0)
+        os.dup2(slave, 1)
+        os.dup2(slave, 2)
+        os.close(slave)
+        os.execvp(sys.executable, [sys.executable, "-c", _CHILD_SCRIPT])
+    else:
+        os.close(slave)
+        try:
+            buf = b""
+            deadline = time.time() + timeout
+            while b"CHILD READY" not in buf and time.time() < deadline:
+                if select.select([master], [], [], 0.2)[0]:
+                    buf += os.read(master, 4096)
+            time.sleep(0.4)  # settle time for tty.setcbreak() to actually engage
+
+            for item in write_sequence:
+                os.write(master, item)
+                time.sleep(0.08)
+            time.sleep(0.5)
+
+            out = b""
+            try:
+                while select.select([master], [], [], 0.4)[0]:
+                    chunk = os.read(master, 4096)
+                    if not chunk:
+                        break
+                    out += chunk
+            except OSError:
+                pass
+
+            for _ in range(30):
+                wpid, _status = os.waitpid(pid, os.WNOHANG)
+                if wpid != 0:
+                    break
+                time.sleep(0.1)
+            else:
+                os.kill(pid, signal.SIGKILL)
+                os.waitpid(pid, 0)
+            return out.decode(errors="replace")
+        finally:
+            os.close(master)
+
+
+pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="pty is POSIX-only; rawline's Windows path uses msvcrt instead")
+
+
+def test_plain_type_and_enter_submits():
+    assert "RESULT:'hello world'" in _run_pty([b"hello world", b"\r"])
+
+
+def test_backspace_removes_the_last_character():
+    assert "RESULT:'hello'" in _run_pty([b"helloX", b"\x7f", b"\r"])
+
+
+def test_esc_clears_the_in_progress_line():
+    assert "RESULT:'clean'" in _run_pty([b"garbage text", b"\x1b", b"clean", b"\r"])
+
+
+def test_trailing_backslash_continues_composing_a_second_line():
+    assert "RESULT:'line one\\nline two'" in _run_pty([b"line one\\", b"\r", b"line two", b"\r"])
+
+
+def test_alt_enter_continues_composing_not_a_clear():
+    """The real bug this locks in: ICRNL can translate the \\r half of
+    \\x1b\\r into \\n before it's read, and the escape-sequence detector
+    must still recognize it as Alt+Enter, not fall through to a plain Esc."""
+    assert "RESULT:'first\\nsecond'" in _run_pty([b"first", b"\x1b\r", b"second", b"\r"])
+
+
+def test_csi_u_shift_enter_continues_composing():
+    assert "RESULT:'alpha\\nbeta'" in _run_pty([b"alpha", b"\x1b[13;2u", b"beta", b"\r"])
+
+
+def test_esc_clears_a_whole_multi_line_composition():
+    assert "RESULT:'restart'" in _run_pty([b"first", b"\x1b\r", b"second", b"\x1b", b"restart", b"\r"])
+
+
+def test_ctrl_c_returns_none_instead_of_crashing():
+    """The real bug this locks in: ISIG left enabled meant the kernel
+    intercepted Ctrl+C as a real SIGINT before byte 0x03 ever reached our
+    own explicit handling for it, crashing the process instead of a clean
+    'leave the session' (None)."""
+    assert "RESULT:None" in _run_pty([b"partial", b"\x03"])
+
+
+def test_ctrl_d_on_an_empty_buffer_returns_none():
+    assert "RESULT:None" in _run_pty([b"\x04"])

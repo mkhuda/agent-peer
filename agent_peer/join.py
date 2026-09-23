@@ -12,12 +12,7 @@ from .sender import send_message
 from .thread import read_thread, append_thread_message, touch_thread_presence
 from .logs import format_thread_entry, format_thread_presence_header, supports_color
 from .picker import pick_multi
-
-try:
-    import readline  # noqa: F401 - presence alone enables redisplay(); unavailable on Windows
-    _HAS_READLINE = True
-except ImportError:
-    _HAS_READLINE = False
+from .rawline import LineEditor, read_message
 
 
 def _thread_is_new(thread_id: str) -> bool:
@@ -73,17 +68,18 @@ def invite_agents(thread_id: str, sender: str, all_scope: bool = False) -> list:
     return invited
 
 
-def _print_live(text: str):
+def _print_live(text: str, editor):
     """Clears the in-progress input line, prints the incoming message, then
-    redraws the prompt + whatever the foreman had already typed."""
+    redraws the prompt + whatever the foreman had already typed (editor is
+    None in the non-tty fallback path - nothing to redraw there)."""
     sys.stdout.write("\r\033[K")
     sys.stdout.write(text if text.endswith("\n") else text + "\n")
-    if _HAS_READLINE:
-        readline.redisplay()
+    if editor is not None:
+        editor.render()
     sys.stdout.flush()
 
 
-def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color):
+def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor):
     while not stop_event.is_set():
         for r in read_thread(thread_id):
             seq = r.get("seq", 0)
@@ -92,7 +88,7 @@ def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color):
             last_seq_box[0] = seq
             if r.get("from") == participant:
                 continue  # already visible from your own typed line
-            _print_live(format_thread_entry(r, use_color=use_color))
+            _print_live(format_thread_entry(r, use_color=use_color), editor)
         touch_thread_presence(thread_id, participant)
         stop_event.wait(0.5)
 
@@ -119,21 +115,35 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
         # a rejoin has no such echo and must show everything
         print(format_thread_entry(r, use_color=use_color))
 
+    # A real tty gets the raw/cbreak multi-line editor (Esc clears the whole
+    # composition, Shift+Enter/Alt+Enter/trailing "\" all continue composing
+    # instead of submitting); a non-tty caller (this module's own piped-
+    # stdin tests) keeps plain input() - rawline's raw-mode read assumes a
+    # real terminal and would fail against a pipe.
+    use_raw = sys.stdin.isatty()
+    editor = LineEditor("> ") if use_raw else None
+
     last_seq_box = [backlog[-1]["seq"] if backlog else 0]
     stop_event = threading.Event()
     touch_thread_presence(thread_id, participant)
-    poller = threading.Thread(target=_poll_loop, args=(thread_id, participant, last_seq_box, stop_event, use_color), daemon=True)
+    poller = threading.Thread(target=_poll_loop, args=(thread_id, participant, last_seq_box, stop_event, use_color, editor), daemon=True)
     poller.start()
 
     try:
         while True:
-            try:
-                line = input("> ").strip()
-            except (EOFError, KeyboardInterrupt):
+            if use_raw:
+                text = read_message(editor)
+            else:
+                try:
+                    text = input("> ")
+                except (EOFError, KeyboardInterrupt):
+                    text = None
+            if text is None:
                 break
-            if not line:
+            text = text.strip()
+            if not text:
                 continue
-            record = append_thread_message(thread_id, participant, line)
+            record = append_thread_message(thread_id, participant, text)
             last_seq_box[0] = max(last_seq_box[0], record["seq"])
     finally:
         stop_event.set()
