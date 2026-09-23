@@ -253,6 +253,41 @@ class PresenceLifecycleTest(unittest.TestCase):
             server.close()
 
 
+    def test_busy_gating_uses_exact_mention_token(self):
+        server = self._native_session("sam", status="busy")
+        try:
+            _write_presence(self.home, "t9", {"sam": {"pid": 424242, "last_seen": time.time()}})
+            self._post("t9", "bob", "@sam-2 hi")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "@sam-2 must not wake a busy sam")
+            self._post("t9", "bob", "@sam hi")
+            self.assertTrue(
+                wait_until(lambda: "@sam hi" in server.text(), timeout=5),
+                "exact @sam must push through busy gating",
+            )
+        finally:
+            server.close()
+
+    def test_soft_leave_knock_uses_exact_mention_token(self):
+        server = self._native_session("sal")
+        try:
+            _write_presence(
+                self.home, "t10", {"sal": {"pid": 424242, "last_seen": time.time(), "left": True}}
+            )
+            self._post("t10", "bob", "@sal-2 hi")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "@sal-2 must not knock a left sal")
+            self.assertTrue(_presence(self.home, "t10")["sal"].get("left"), "must stay left")
+            self._post("t10", "bob", "@sal hi")
+            self.assertTrue(
+                wait_until(lambda: "@sal hi" in server.text(), timeout=5),
+                "exact @sal must knock through soft-leave",
+            )
+            self.assertFalse(_presence(self.home, "t10")["sal"].get("left"), "knock must restore")
+        finally:
+            server.close()
+
+
 class MentionTokenTest(unittest.TestCase):
     """_mention_tokens is pure string work: pin the token shape here."""
 
@@ -265,6 +300,15 @@ class MentionTokenTest(unittest.TestCase):
         self.assertEqual(_mention_tokens("@all stop"), {"all"})
         # Trailing punctuation is not part of the name.
         self.assertEqual(_mention_tokens("hi @zoe, welcome"), {"zoe"})
+
+    def test_mentions_matrix(self):
+        from agent_peer.thread import _mentions
+
+        self.assertTrue(_mentions("@sam hi", "sam"))
+        self.assertFalse(_mentions("@sam-2 hi", "sam"))
+        self.assertTrue(_mentions("hey @all", "whoever"))
+        self.assertTrue(_mentions("[stop] now", "whoever"))
+        self.assertFalse(_mentions("general banter", "sam"))
 
 
 if __name__ == "__main__":

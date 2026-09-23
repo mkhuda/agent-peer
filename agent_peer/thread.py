@@ -90,14 +90,15 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
     return record
 
 
-def _mentions(content: str, name: str) -> bool:
-    return f"@{name}" in content or "@all" in content or "[stop]" in content
-
-
 def _mention_tokens(content: str):
     # Token-exact (not substring): "@codex-8763" must not match a session
     # literally named "codex-8763-2" in another project.
     return set(re.findall(r"@([A-Za-z0-9_.\-]+)", content))
+
+
+def _mentions(content: str, name: str) -> bool:
+    tokens = _mention_tokens(content)
+    return name in tokens or "all" in tokens or "[stop]" in content
 
 
 def _find_session(sessions, name: str, pid: int):
