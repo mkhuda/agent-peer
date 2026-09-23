@@ -278,7 +278,7 @@ def cmd_thread(args):
 
     if args.leave:
         if leave_thread_presence(args.thread_id, participant):
-            print(f"Left thread '{args.thread_id}' - posts will no longer push you. Rejoin anytime: agent-peer thread {args.thread_id}")
+            print(f"Left thread '{args.thread_id}' - banter will no longer push you, but @mentions still knock. Rejoin anytime: agent-peer thread {args.thread_id}")
         else:
             print(f"Not present in thread '{args.thread_id}' - nothing to leave.")
         return
@@ -480,7 +480,7 @@ def main():
     p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
-    p_thread.add_argument("--leave", action="store_true", help="Step out: drop presence so thread posts stop pushing you (cursor kept - rejoin replays the backlog)")
+    p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
     p_thread.add_argument("-a", "--all", action="store_true", help="With --interactive: scope the invite picker mesh-wide instead of just this workspace")

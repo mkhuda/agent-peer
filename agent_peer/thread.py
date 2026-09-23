@@ -118,13 +118,15 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     """Active presence entries eligible for a native push: not the sender,
     not this process, seen recently. Resolved by name at push time (the
     presence pid is the waiter/join process, never a registered session).
-    A busy participant is only pushed on @name/@all/[stop] (anti-bombing)."""
+    A busy participant is only pushed on @name/@all/[stop] (anti-bombing).
+    A soft-left participant likewise, and the knock restores them."""
     now = time.time()
     try:
         sessions = get_active_sessions()
     except Exception:
         sessions = []
     targets = []
+    knocked = []
     for name, info in read_thread_presence(thread_id).items():
         if not isinstance(info, dict):
             continue
@@ -133,7 +135,13 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
             continue
         if not isinstance(pid, int):
             continue
-        if now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+        left = bool(info.get("left"))
+        if left:
+            # Parked deliberately: no expiry, banter never knocks, an
+            # explicit mention restores presence and pushes (Phase 6).
+            if not _mentions(content, name):
+                continue
+        elif now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
             continue
         session = _find_session(sessions, name, pid)
         if not _push_wanted(session):
@@ -141,6 +149,10 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         if session is not None and session.get("status") == "busy" and not _mentions(content, name):
             continue
         targets.append((name, pid))
+        if left:
+            knocked.append(name)
+    if knocked:
+        restore_thread_presence(thread_id, knocked)
     return targets
 
 
@@ -243,10 +255,11 @@ def touch_thread_presence(thread_id: str, participant: str):
 
 
 def leave_thread_presence(thread_id: str, participant: str) -> bool:
-    """Step out of the meeting: drop the presence entry so fanout skips
-    this participant. The cursor is deliberately left alone - rejoining
+    """Step out of the meeting (soft-leave): mark the presence entry left
+    so banter skips this participant, while @mention/@all/[stop] can still
+    knock (Phase 6). The cursor is deliberately left alone - rejoining
     (`agent-peer thread <id>`) re-touches presence and replays everything
-    past last_seq as catch-up. Returns True if an entry was removed."""
+    past last_seq as catch-up. Returns True if the entry exists."""
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
     lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
@@ -258,13 +271,43 @@ def leave_thread_presence(thread_id: str, participant: str) -> bool:
                 presence = json.load(f)
         except Exception:
             return False
-        if participant not in presence:
+        entry = presence.get(participant)
+        if not isinstance(entry, dict):
             return False
-        del presence[participant]
+        entry["left"] = True
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
         return True
+    finally:
+        compat.release_lock(lock_handle)
+
+
+def restore_thread_presence(thread_id: str, names) -> None:
+    """Clear the left flag after a mention knock: the participant is active
+    again with a fresh timestamp (locked; best-effort)."""
+    path = get_thread_presence_path(thread_id)
+    lock_path = get_thread_lock_path(thread_id) + ".presence"
+    lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
+    if lock_handle is None:
+        return
+    try:
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                presence = json.load(f)
+        except Exception:
+            return
+        changed = False
+        for name in names:
+            entry = presence.get(name)
+            if isinstance(entry, dict) and entry.get("left"):
+                entry["left"] = False
+                entry["last_seen"] = time.time()
+                changed = True
+        if changed:
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(presence, f)
+            _secure(path)
     finally:
         compat.release_lock(lock_handle)
 

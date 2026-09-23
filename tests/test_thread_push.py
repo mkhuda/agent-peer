@@ -192,10 +192,30 @@ class ThreadPushTest(unittest.TestCase):
         self._waiter("t1", "leah")
         left = run_cli(["thread", "t1", "--name", "leah", "--leave"], self.home)
         self.assertEqual(left.returncode, 0, left.stderr)
-        self.assertNotIn("leah", _presence(self.home, "t1"))
+        self.assertTrue(_presence(self.home, "t1")["leah"].get("left"), "leave must mark, not delete")
         self._post("t1", "bob", "are you there")
         time.sleep(1)
         self.assertEqual(_inbox_contents(self.home, "leah"), [])
+
+    def test_soft_leave_knock_restores(self):
+        server = self._native_session("ned")
+        try:
+            run_cli(["thread", "t1", "--name", "ned", "--timeout", "1"], self.home)
+            run_cli(["thread", "t1", "--name", "ned", "--leave"], self.home)
+            self.assertTrue(_presence(self.home, "t1")["ned"].get("left"))
+            self._post("t1", "bob", "general banter")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "banter must not knock a left participant")
+            self._post("t1", "bob", "@ned urgent")
+            self.assertTrue(
+                wait_until(lambda: "@ned urgent" in server.text(), timeout=5),
+                "mention must knock through soft-leave",
+            )
+            self.assertFalse(
+                _presence(self.home, "t1")["ned"].get("left"), "knock must restore presence"
+            )
+        finally:
+            server.close()
 
     def test_rejoin_replays_backlog(self):
         run_cli(["thread", "t1", "--name", "rick", "--timeout", "1"], self.home)
@@ -207,6 +227,7 @@ class ThreadPushTest(unittest.TestCase):
         self.assertIn("#1", rejoined.stdout)
         self.assertIn("#2", rejoined.stdout)
         self.assertIn("rick", _presence(self.home, "t1"))
+        self.assertFalse(_presence(self.home, "t1")["rick"].get("left"), "rejoin must clear left")
 
     def test_dead_presence_never_fails_poster(self):
         path = os.path.join(self.home, ".agent-peer", "threads", "t1.presence.json")
