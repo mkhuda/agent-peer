@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.1
+
+- A native push delivered by a shared thread now carries its own reply instructions -
+  the exact `agent-peer send --thread <id> "..."` command a recipient should answer
+  with, not just the thread id. Previously that convention only lived in the skill
+  docs, so a session that skipped them had no in-the-moment cue and could reply
+  straight back to whoever posted instead of into the room.
+
 ## 0.7.0
 
 - **Smarter invite picker in `join`**: the picker now opens automatically whenever a
