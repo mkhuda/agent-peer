@@ -133,7 +133,7 @@ class PresenceLifecycleTest(unittest.TestCase):
         finally:
             server.close()
 
-    def test_indefinite_wait_arms_room_push(self):
+    def test_indefinite_wait_active_then_knock_after_leave(self):
         server = self._native_session("ina")
         try:
             waiter = spawn_cli(["thread", "t2", "--name", "ina"], self.home)
@@ -145,9 +145,13 @@ class PresenceLifecycleTest(unittest.TestCase):
             stop_cli(waiter)
             self.procs.remove(waiter)
             self._post("t2", "bob", "general banter")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "active member reads via poll only - never pushed")
+            run_cli(["thread", "t2", "--name", "ina", "--leave"], self.home)
+            self._post("t2", "bob", "@ina urgent")
             self.assertTrue(
-                wait_until(lambda: "general banter" in server.text(), timeout=5),
-                "dead waiter with armed presence must get the backstop push",
+                wait_until(lambda: "@ina urgent" in server.text(), timeout=5),
+                "left + mention must knock",
             )
         finally:
             server.close()
@@ -173,7 +177,7 @@ class PresenceLifecycleTest(unittest.TestCase):
             _presence(self.home, "t3")["foreman"].get("left"), "interactive join is active presence, never a peek"
         )
 
-    def test_live_waiter_suppresses_socket_push(self):
+    def test_active_never_pushed_even_on_mention(self):
         server = self._native_session("liv")
         try:
             waiter = spawn_cli(["thread", "t4", "--name", "liv"], self.home)
@@ -185,26 +189,57 @@ class PresenceLifecycleTest(unittest.TestCase):
             self.assertFalse(_presence(self.home, "t4")["liv"].get("left"))
             self._post("t4", "bob", "general banter")
             time.sleep(1)  # fanout runs inside the post call; absence after is final
-            self.assertEqual(server.text(), "", "live reader already sees the poll - no socket ping")
+            self.assertEqual(server.text(), "", "active banter must not push")
+            self._post("t4", "bob", "@liv are you there")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "active mention must not push either")
             stop_cli(waiter)
             self.procs.remove(waiter)
-            self._post("t4", "bob", "second wave")
+            run_cli(["thread", "t4", "--name", "liv", "--leave"], self.home)
+            self._post("t4", "bob", "@liv third wave")
             self.assertTrue(
-                wait_until(lambda: "second wave" in server.text(), timeout=5),
-                "once the reader exits, the same presence must get the backstop",
+                wait_until(lambda: "@liv third wave" in server.text(), timeout=5),
+                "left + mention must knock",
             )
         finally:
             server.close()
 
-    def test_dead_waiter_triggers_wake_push(self):
+    def test_dead_active_waiter_stays_silent(self):
+        # No reader, no knock: an active-but-unattended member hears
+        # nothing until they poll again or leave (skill discipline).
         server = self._native_session("zed")
         try:
             _write_presence(self.home, "t5", {"zed": {"pid": 424242, "last_seen": time.time()}})
             self._post("t5", "bob", "wake up")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "active member is never pushed, reader or not")
+        finally:
+            server.close()
+
+    def test_live_peek_suppresses_knock(self):
+        # A still-running peek sees the mention via its own poll, so the
+        # socket stays quiet and the peek is not promoted to active.
+        server = self._native_session("peg")
+        try:
+            waiter = spawn_cli(["thread", "t11", "--name", "peg", "--timeout", "30"], self.home)
+            self.procs.append(waiter)
             self.assertTrue(
-                wait_until(lambda: "[thread: t5 #1 from bob]: wake up" in server.text(), timeout=5),
-                "dead waiter with fresh presence must get the wake push",
+                wait_until(lambda: "peg" in _presence(self.home, "t11"), timeout=5),
+                "waiter never touched presence",
             )
+            self.assertTrue(_presence(self.home, "t11")["peg"].get("left"))
+            self._post("t11", "bob", "@peg hi")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "live peek reader must not get the knock")
+            self.assertTrue(_presence(self.home, "t11")["peg"].get("left"), "must stay gated")
+            stop_cli(waiter)
+            self.procs.remove(waiter)
+            self._post("t11", "bob", "@peg hi again")
+            self.assertTrue(
+                wait_until(lambda: "@peg hi again" in server.text(), timeout=5),
+                "dead peek + mention must knock",
+            )
+            self.assertFalse(_presence(self.home, "t11")["peg"].get("left"), "knock must restore")
         finally:
             server.close()
 
@@ -234,36 +269,6 @@ class PresenceLifecycleTest(unittest.TestCase):
             self.assertTrue(
                 wait_until(lambda: "@sam-2 hi" in server.text(), timeout=5),
                 "exact @sam-2 must knock",
-            )
-        finally:
-            server.close()
-
-    def test_pid_reuse_resilience(self):
-        server = self._native_session("old")
-        try:
-            # Stale timestamp, but the pid belongs to this very test process:
-            # alive, yet must not resurrect the entry.
-            _write_presence(
-                self.home, "t8", {"old": {"pid": os.getpid(), "last_seen": time.time() - 600}}
-            )
-            self._post("t8", "bob", "general banter")
-            time.sleep(1)  # fanout runs inside the post call; absence after is final
-            self.assertEqual(server.text(), "", "stale entry must stay skipped despite a live pid")
-        finally:
-            server.close()
-
-
-    def test_busy_gating_uses_exact_mention_token(self):
-        server = self._native_session("sam", status="busy")
-        try:
-            _write_presence(self.home, "t9", {"sam": {"pid": 424242, "last_seen": time.time()}})
-            self._post("t9", "bob", "@sam-2 hi")
-            time.sleep(1)  # fanout runs inside the post call; absence after is final
-            self.assertEqual(server.text(), "", "@sam-2 must not wake a busy sam")
-            self._post("t9", "bob", "@sam hi")
-            self.assertTrue(
-                wait_until(lambda: "@sam hi" in server.text(), timeout=5),
-                "exact @sam must push through busy gating",
             )
         finally:
             server.close()

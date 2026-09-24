@@ -16,9 +16,6 @@ from .sender import send_message
 from .registry import get_active_sessions
 from . import compat
 
-# A presence older than this is somebody who wandered off, not an active
-# participant - fanout skips them (0028 Open Q1: spec suggests 5 minutes).
-PRESENCE_ACTIVE_SECONDS = 300
 # Total wall-time budget for one fanout across all concurrent workers.
 FANOUT_BUDGET_SECONDS = 0.2
 
@@ -101,38 +98,14 @@ def _mentions(content: str, name: str) -> bool:
     return name in tokens or "all" in tokens or "[stop]" in content
 
 
-def _find_session(sessions, name: str, pid: int):
-    for session in sessions:
-        if session.get("name") == name or session.get("pid") == pid:
-            return session
-    return None
-
-
-def _push_wanted(session) -> bool:
-    # Native targets get pushed (their own poll can't wake them): real
-    # Claude Code sessions, and Codex sessions with a queue thread id.
-    # Managed-listener sessions (agy/muse/pi/opencode) are already covered
-    # by the thread poll that put them in presence - pushing would only
-    # double-notify their inbox. Unknown session: attempt anyway, the
-    # push fails silently on a dead target either way.
-    if session is None:
-        return True
-    if session.get("agentType") == "CODEX" and session.get("codexThreadId"):
-        return True
-    return not session.get("managedByAgentPeer")
-
-
 def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str, int]]:
-    """Active presence entries eligible for a native push: not the sender,
-    not this process, seen recently, and with no live reader process (a
-    live waiter already delivers via its own poll - the socket is only a
-    wake-up backstop). Resolved by name at push time (the presence pid is
-    the waiter/join process, never a registered session). A busy
-    participant is only pushed on @name/@all/[stop] (anti-bombing). A
-    soft-left participant likewise, and the knock restores them. Plus a
-    one-shot knock for mesh sessions explicitly @mentioned that have no
-    presence entry at all (never enrolled - knock is not an invite)."""
-    now = time.time()
+    """Who gets a socket push for this post. Active members (left=False)
+    never do - they read the room stream via their own poll, and the
+    socket is the out-of-room intercom, never a second room speaker.
+    Only two paths knock: a soft-left member explicitly mentioned
+    (restored to active by the knock), and a mesh session with no
+    presence entry at all explicitly mentioned (one-shot, never
+    enrolled - knock is not an invite)."""
     try:
         sessions = get_active_sessions()
     except Exception:
@@ -148,23 +121,15 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
             continue
         if not isinstance(pid, int):
             continue
-        left = bool(info.get("left"))
-        # Staleness first: a reused pid must never resurrect a wandered-off
-        # entry - the timestamp is the safety net, liveness only suppresses.
-        if not left and now - info.get("last_seen", 0) > PRESENCE_ACTIVE_SECONDS:
+        if not info.get("left"):
             continue
+        # A still-running peek already sees the mention via its own poll.
         if compat.is_pid_alive(pid):
             continue
-        if left and not _mentions(content, name):
-            continue
-        session = _find_session(sessions, name, pid)
-        if not _push_wanted(session):
-            continue
-        if session is not None and session.get("status") == "busy" and not _mentions(content, name):
+        if not _mentions(content, name):
             continue
         targets.append((name, pid))
-        if left:
-            knocked.append(name)
+        knocked.append(name)
     pushed = {name for name, _ in targets}
     for token in _mention_tokens(content):
         # Mesh-wide summons: exact name, no presence entry (the presence

@@ -161,15 +161,19 @@ class ThreadPushTest(unittest.TestCase):
         with open(path, "w", encoding="utf-8") as fh:
             json.dump(presence, fh)
 
-    def test_push_delivered_to_native_participant(self):
+    def test_active_native_never_pushed_poll_only(self):
+        # Intercom doctrine (test-1 consensus #344-351): an active member
+        # reads the room stream via poll; the socket never speaks inside
+        # the room, not even on @mention.
         server = self._native_session("nat")
         try:
             self._touch_presence("t1", "nat")
             self._post("t1", "bob", "hello team")
-            self.assertTrue(
-                wait_until(lambda: "[thread: t1 #1 from bob]: hello team" in server.text(), timeout=5),
-                "framed push never arrived over the native socket",
-            )
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "active banter must not push")
+            self._post("t1", "bob", "@nat are you there")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "active mention must not push either")
         finally:
             server.close()
 
@@ -196,6 +200,24 @@ class ThreadPushTest(unittest.TestCase):
         self._post("t1", "bob", "are you there")
         time.sleep(1)
         self.assertEqual(_inbox_contents(self.home, "leah"), [])
+
+    def test_left_managed_listener_gets_knock_in_inbox(self):
+        # A left managed member is not polling the room, so the knock is
+        # their only delivery - it must land in the listener inbox.
+        self._listen("kate")
+        waiter = self._waiter("t1", "kate")
+        stop_cli(waiter)
+        self.procs.remove(waiter)
+        left = run_cli(["thread", "t1", "--name", "kate", "--leave"], self.home)
+        self.assertEqual(left.returncode, 0, left.stderr)
+        self._post("t1", "bob", "@kate urgent")
+        self.assertTrue(
+            wait_until(
+                lambda: any("@kate urgent" in c for c in _inbox_contents(self.home, "kate")),
+                timeout=5,
+            ),
+            "left + mention must knock the managed inbox",
+        )
 
     def test_soft_leave_knock_restores(self):
         server = self._native_session("ned")
@@ -253,17 +275,24 @@ class ThreadPushTest(unittest.TestCase):
         with open(log, encoding="utf-8") as fh:
             self.assertIn("hello ghosts", fh.read())
 
-    def test_busy_gating(self):
+    def test_busy_active_silent_left_knock_rings(self):
+        # Busy no longer gates anything for actives (they are poll-only);
+        # the knock path is left + mention, regardless of busy status.
         server = self._native_session("beth", status="busy")
         try:
             self._touch_presence("t1", "beth")
-            self._post("t1", "bob", "general banter")
+            self._post("t1", "bob", "@beth urgent")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "active mention must not push, busy or not")
+            left = run_cli(["thread", "t1", "--name", "beth", "--leave"], self.home)
+            self.assertEqual(left.returncode, 0, left.stderr)
+            self._post("t1", "bob", "@beth-2 hi")
             time.sleep(1)
-            self.assertEqual(server.text(), "", "busy + no mention must not push")
+            self.assertEqual(server.text(), "", "@beth-2 must not knock a left beth")
             self._post("t1", "bob", "@beth urgent")
             self.assertTrue(
                 wait_until(lambda: "@beth urgent" in server.text(), timeout=5),
-                "@beth mention must push through busy gating",
+                "left + mention must knock even when busy",
             )
         finally:
             server.close()
@@ -319,22 +348,6 @@ class AutoNameFixOneTest(unittest.TestCase):
     def test_unregistered_falls_back_to_invented(self):
         self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", 999998)
         self.assertEqual(self.protocol.auto_session_name(), "claude-999998")
-
-
-class PushWantedTest(unittest.TestCase):
-    """Direction (b): push natives + codex-queue, skip managed listeners,
-    attempt when the session record is unknown. Pure function, no HOME."""
-
-    def test_matrix(self):
-        from agent_peer.thread import _push_wanted
-
-        self.assertTrue(_push_wanted(None))
-        self.assertTrue(_push_wanted({"managedByAgentPeer": False}))
-        self.assertTrue(
-            _push_wanted({"managedByAgentPeer": True, "agentType": "CODEX", "codexThreadId": "t"})
-        )
-        self.assertFalse(_push_wanted({"managedByAgentPeer": True}))
-        self.assertFalse(_push_wanted({"managedByAgentPeer": True, "agentType": "CODEX"}))
 
 
 if __name__ == "__main__":
