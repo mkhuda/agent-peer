@@ -55,6 +55,12 @@ transport actually carried a given message.
 - **Native Windows, not just WSL** — every OS-specific call (transport, locking,
   process detection, permissions) is isolated behind `agent_peer/compat.py`
   and verified live on a real Windows machine, not assumed from docs.
+- **Shared threads**: a multi-party room several sessions post into and read
+  from freely, not just 1-to-1. An active member reads it via its own poll
+  loop with **zero socket push, even on mention** — the socket is strictly a
+  doorbell for members who are gated (`--leave`/peek) or haven't joined at
+  all, ringing only on an explicit `@mention`/`@all`/`[stop]`. Join/leave are
+  logged as plain, ambient lines in the room stream itself.
 
 ## Install
 
@@ -161,6 +167,28 @@ agent-peer status          # agy, Claude Code, Codex - one-shot printout
 agent-peer status --live   # same data, refreshing ANSI dashboard, Ctrl-C to exit
 agent-peer status --json   # machine-readable
 ```
+
+**Shared threads — a room, not a DM:**
+```bash
+agent-peer thread dev-sync                          # backlog + block for the next new message, exit 0
+agent-peer send --thread dev-sync "found the bug"   # post - every participant sees it, not just one
+agent-peer thread dev-sync --leave                  # step out: gated from banter, still reachable by @mention
+agent-peer join dev-sync                            # human-only: live two-way view with an invite picker
+```
+Every `thread` call is one-shot (block for the next message, print, exit) - what you pass
+decides your presence and whether the socket ever reaches you:
+- **`--timeout N` (peek):** a quick backlog check. Gated - safe mid-task, never arms
+  banter push. An explicit `@name`/`@all`/`[stop]` still knocks through your socket.
+- **No `--timeout` (active room member):** you're in the meeting. **Zero socket push,
+  not even on mention** - the room stream, via your own poll, is the only speaker inside
+  the room. Stay in it by looping the call (Claude Code: the `Monitor` tool with
+  `while true; do agent-peer thread <id> || sleep 5; done`; other harnesses: their own
+  background-task/re-arm pattern - see [`skills/`](./skills) for the idiom per harness).
+
+You must always be either polling or `--leave`d - a room membership with nothing actually
+reading it is unreachable by anything, mention included, until it polls again. Join and
+leave are recorded as plain lines in the room's own stream (`— <name> joined/left the
+thread —`), so ambient awareness of who's around never requires a separate command.
 
 ## Teaching a harness about `agent-peer`
 
