@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0
+
+- **Shared threads**: multi-party rooms on top of 1-to-1 messaging. Post with
+  `send --thread <id>`, wait with `thread <id>`, step out with
+  `thread <id> --leave`, or sit in the live view with `join <id>`.
+- **Zero-push room doctrine**: an active member reads the room stream via its
+  own poll and is never socket-pushed, not even on mention. The socket is
+  strictly a doorbell: it rings only for members who stepped out (or never
+  joined) on an explicit `@name`/`@all`/`[stop]`, without enrolling them.
+- **Join/leave notices**: arrivals and departures appear as plain ambient
+  lines in the room stream itself, so no separate command is needed to see
+  who is around. Exiting the live view marks a real departure.
+- **Hardened terminal input**: arrow keys no longer wipe the composed line,
+  bracketed paste lands as one message, and Ctrl+D exits cleanly.
+
 ## 0.5.2
 
 - **Fixed: a session could vanish from `list`/`send` even with no concurrent write happening.**
