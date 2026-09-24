@@ -132,6 +132,15 @@ def test_esc_clears_the_in_progress_line():
     assert "RESULT:'clean'" in _run_pty([b"garbage text", b"\x1b", b"clean", b"\r"])
 
 
+def test_arrow_keys_are_ignored_not_a_clear():
+    """Real bug, caught live: pressing Up/Left/Down/Right mid-composition
+    used to fall through to editor.reset() and wipe everything typed.
+    Unrecognized escape sequences must be swallowed, keeping the buffer
+    intact."""
+    arrows = [b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"]
+    assert "RESULT:'keep me'" in _run_pty([b"keep me"] + arrows + [b"\r"])
+
+
 def test_trailing_backslash_continues_composing_a_second_line():
     assert "RESULT:'line one\\nline two'" in _run_pty([b"line one\\", b"\r", b"line two", b"\r"])
 

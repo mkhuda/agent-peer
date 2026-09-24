@@ -96,12 +96,13 @@ class LineEditor:
 def _read_escape_sequence(fd, timeout=0.05):
     """Called right after a bare ESC byte. Returns "ENTER" for Alt+Enter
     (\\x1b\\r) or CSI-u Shift+Enter (\\x1b[13;2u), "PASTE_START" for a
-    bracketed-paste begin marker (\\x1b[200~), None for a standalone Esc or
-    any other/unrecognized sequence (e.g. arrow keys - ignored for now)."""
+    bracketed-paste begin marker (\\x1b[200~), "CANCEL" for a standalone
+    Esc (nothing follows), None for any other/unrecognized sequence
+    (e.g. arrow keys - swallowed, must never clear the buffer)."""
     import select
 
     if not select.select([fd], [], [], timeout)[0]:
-        return None
+        return "CANCEL"
     ch2 = os.read(fd, 1).decode(errors="replace")
     if ch2 in ("\r", "\n"):  # ICRNL may have already translated \r to \n
         return "ENTER"
@@ -177,12 +178,14 @@ def _read_posix(editor: LineEditor):
                 marker = _read_escape_sequence(fd)
                 if marker == "ENTER":
                     editor.newline()
+                    editor.render()
                 elif marker == "PASTE_START":
                     editor.paste_extend(_consume_bracketed_paste(fd))
-                else:
+                    editor.render()
+                elif marker == "CANCEL":
                     editor.reset()
-                editor.render()
-                continue
+                    editor.render()
+                continue  # unrecognized keys (arrows etc.): ignore, keep composing
             if ch in ("\r", "\n"):
                 if editor.lines[-1].endswith("\\"):
                     editor.lines[-1] = editor.lines[-1][:-1]
