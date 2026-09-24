@@ -9,7 +9,7 @@ import threading
 from .protocol import get_thread_path
 from .registry import get_active_sessions
 from .sender import send_message
-from .thread import read_thread, append_thread_message, touch_thread_presence, leave_thread_presence
+from .thread import read_thread, append_thread_message, touch_thread_presence, leave_thread_presence, read_thread_presence
 from .logs import format_thread_entry, format_thread_presence_header, supports_color
 from .picker import pick_multi
 from .rawline import LineEditor, read_message
@@ -35,13 +35,51 @@ def _render_session(s):
     return f"{s.get('name')}  ({s.get('agentType', '?')}, {s.get('status', 'idle')}, {s.get('cwd', '?')})"
 
 
+def _invite_message(thread_id: str, agent_type: str) -> str:
+    """Harness-safe invite text: an indefinite `thread <id>` is only safe
+    advice for a harness with a persistent poll loop (Claude/Muse). Codex
+    has no such loop (confirmed live: an indefinite call can die between
+    its own runtime's turn cuts with nothing re-arming it), so it gets
+    pointed at its own skill + a bounded peek instead of a command that
+    would strand it deaf. Unknown/other harnesses get a generic pointer."""
+    if agent_type == "CODEX":
+        return (
+            f"[change]: Foreman invited you to thread '{thread_id}'. "
+            f"Please check your skill instructions first, then join via "
+            f"bounded peek & poll ('agent-peer thread {thread_id} --timeout 10')."
+        )
+    if agent_type == "AGY":
+        return (
+            f"[change]: Foreman invited you to thread '{thread_id}'. "
+            f"Check thread '{thread_id}' per your skill workflow."
+        )
+    if agent_type in ("CLAUDE", "MUSE"):
+        return (
+            f"[change]: Foreman invited you to thread '{thread_id}'. "
+            f"Join with: 'agent-peer thread {thread_id}'."
+        )
+    return (
+        f"[change]: Foreman invited you to thread '{thread_id}'. "
+        f"Please check thread '{thread_id}' per your agent harness idiom."
+    )
+
+
 def invite_agents(thread_id: str, sender: str, all_scope: bool = False) -> list:
     """Shows the picker, DMs each selected session to go join. Returns the
-    names actually invited (empty on no candidates, cancel, or no TTY)."""
-    sessions = _candidate_sessions(all_scope)
+    names actually invited (empty on no uninvited candidates, cancel, or no
+    TTY). Excludes sessions ALREADY active in the room - not soft-left ones,
+    which remain legitimately re-invitable (e.g. Codex's own bounded-peek
+    idiom always leaves it `left: true` between checks)."""
+    presence = read_thread_presence(thread_id)
+    active_in_room = {
+        name for name, info in presence.items()
+        if isinstance(info, dict) and not info.get("left", False)
+    }
+    sessions = [
+        s for s in _candidate_sessions(all_scope)
+        if s.get("name") != sender and s.get("name") not in active_in_room
+    ]
     if not sessions:
-        scope_note = "the mesh" if all_scope else f"'{os.getcwd()}'"
-        print(f"No active sessions found in {scope_note} to invite.")
         return []
     title = f"Invite agents to '{thread_id}'" + ("" if all_scope else f" (workspace: {os.getcwd()})")
     try:
@@ -58,7 +96,7 @@ def invite_agents(thread_id: str, sender: str, all_scope: bool = False) -> list:
         try:
             send_message(
                 target=name,
-                content=f"[change]: Foreman started thread '{thread_id}' - run `agent-peer thread {thread_id}` to join the discussion.",
+                content=_invite_message(thread_id, s.get("agentType", "")),
                 priority="now",
                 from_name=sender,
             )
@@ -79,8 +117,12 @@ def _print_live(text: str, editor):
     sys.stdout.flush()
 
 
-def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor):
+def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor, paused=None):
     while not stop_event.is_set():
+        if paused is not None and paused.is_set():
+            # /invite has curses on screen - printing here would corrupt it.
+            stop_event.wait(0.2)
+            continue
         for r in read_thread(thread_id):
             seq = r.get("seq", 0)
             if seq <= last_seq_box[0]:
@@ -98,7 +140,12 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     two-way view. A thread has no create/teardown step, so re-running this
     later against the same id is simply the rejoin case."""
     use_color = supports_color()
-    if invite or _thread_is_new(thread_id):
+    presence = read_thread_presence(thread_id)
+    room_is_empty = not any(
+        name != participant and isinstance(info, dict) and not info.get("left", False)
+        for name, info in presence.items()
+    )
+    if invite or _thread_is_new(thread_id) or room_is_empty:
         invited = invite_agents(thread_id, participant, all_scope=all_scope)
         if invited:
             print(f"Invited: {', '.join(invited)}")
@@ -125,8 +172,13 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
 
     last_seq_box = [backlog[-1]["seq"] if backlog else 0]
     stop_event = threading.Event()
+    invite_paused = threading.Event()
     touch_thread_presence(thread_id, participant, left=False)
-    poller = threading.Thread(target=_poll_loop, args=(thread_id, participant, last_seq_box, stop_event, use_color, editor), daemon=True)
+    poller = threading.Thread(
+        target=_poll_loop,
+        args=(thread_id, participant, last_seq_box, stop_event, use_color, editor, invite_paused),
+        daemon=True,
+    )
     poller.start()
 
     try:
@@ -142,6 +194,18 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
                 break
             text = text.strip()
             if not text:
+                continue
+            if text == "/invite" or text.startswith("/invite "):
+                # Pause the poller before curses takes the screen - anything
+                # it prints mid-picker would corrupt the picker's rendering.
+                invite_paused.set()
+                try:
+                    invited = invite_agents(thread_id, participant, all_scope="--all" in text.split())
+                finally:
+                    invite_paused.clear()
+                print(f"Invited: {', '.join(invited)}" if invited else "No new agents to invite.")
+                if editor is not None:
+                    editor.render()
                 continue
             record = append_thread_message(thread_id, participant, text)
             last_seq_box[0] = max(last_seq_box[0], record["seq"])

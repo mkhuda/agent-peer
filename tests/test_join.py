@@ -160,3 +160,101 @@ run_join('sync', 'foreman')
         time.sleep(0.8)  # give the 0.5s poll tick a chance to pick it up
         out, err = proc.communicate(input="\n", timeout=8)
         assert "live incoming reply" in out, (out, err)
+
+
+def _write_presence(home, thread_id, presence):
+    path = os.path.join(home, ".agent-peer", "threads", f"{thread_id}.presence.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(presence, f)
+
+
+def _register_session(home, name, cwd, status="idle"):
+    """A real sleeping process registered as a candidate session (0032) -
+    registry.py filters by kill(pid, 0), a fake PID would just be dropped."""
+    sessions_dir = os.path.join(home, ".claude", "sessions")
+    os.makedirs(sessions_dir, exist_ok=True)
+    proc = subprocess.Popen(["sleep", "5"])
+    with open(os.path.join(sessions_dir, f"{proc.pid}.json"), "w", encoding="utf-8") as f:
+        json.dump({"pid": proc.pid, "name": name, "cwd": cwd, "status": status}, f)
+    with open(os.path.join(sessions_dir, f"{proc.pid}.{'a' * 64}.key"), "w", encoding="utf-8") as f:
+        json.dump({"peerToken": "t"}, f)
+    return proc
+
+
+def test_invite_agents_excludes_active_but_not_soft_left_participants():
+    """0032 Option (c): a session already ACTIVE in the room is a redundant
+    invite target and must be excluded. A soft-left one (e.g. Codex's own
+    bounded-peek idiom, which always leaves it `left: true`) is legitimately
+    re-invitable and must stay a candidate."""
+    with isolated_home() as home:
+        active_proc = _register_session(home, "active-agent", REPO_ROOT)
+        left_proc = _register_session(home, "left-agent", REPO_ROOT)
+        try:
+            _write_presence(home, "sync", {
+                "active-agent": {"pid": 1, "last_seen": time.time(), "left": False},
+                "left-agent": {"pid": 2, "last_seen": time.time(), "left": True},
+            })
+            script = f"""
+import os, sys
+sys.path.insert(0, {REPO_ROOT!r})
+os.chdir({REPO_ROOT!r})
+from agent_peer.join import _candidate_sessions
+from agent_peer.thread import read_thread_presence
+presence = read_thread_presence('sync')
+active = {{n for n, i in presence.items() if not i.get('left')}}
+names = sorted(s['name'] for s in _candidate_sessions(all_scope=False) if s['name'] not in active)
+print(names)
+"""
+            r = _run_py(home, script)
+            assert r.stdout.strip() == "['left-agent']", (r.stdout, r.stderr)
+        finally:
+            active_proc.terminate()
+            active_proc.wait(timeout=5)
+            left_proc.terminate()
+            left_proc.wait(timeout=5)
+
+
+def test_run_join_skips_invite_picker_when_room_has_an_active_participant():
+    """0032 Option (b): a rejoin into a room that already has someone
+    genuinely active must not force the picker - zero friction."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "seed", "--sender", "other-agent"], home)
+        _write_presence(home, "sync", {"other-agent": {"pid": 1, "last_seen": time.time(), "left": False}})
+        result = _run_join_piped(home, "sync", "foreman", "\n")
+        assert result.returncode == 0, result.stderr
+        assert "Could not open the picker" not in result.stdout
+
+
+def test_run_join_triggers_invite_when_room_is_empty():
+    """0032 Option (b): rejoining a room with nobody actively in it must
+    still offer to invite, even though the thread already has history (the
+    old `_thread_is_new` check alone would have missed this case). A
+    candidate must exist, or invite_agents() has nothing to offer and
+    returns silently before ever reaching the picker."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "seed", "--sender", "other-agent"], home)
+        proc = _register_session(home, "candidate-agent", REPO_ROOT)
+        try:
+            result = _run_join_piped(home, "sync", "foreman", "\n")
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+        assert result.returncode == 0, result.stderr
+        # No real TTY here, so the picker can't actually open - but reaching
+        # for it at all proves the trigger fired.
+        assert "Could not open the picker" in result.stdout
+
+
+def test_slash_invite_is_not_posted_as_a_thread_message():
+    with isolated_home() as home:
+        result = _run_join_piped(home, "sync", "foreman", "/invite\nhello\n")
+        assert result.returncode == 0, result.stderr
+        assert "hello" in result.stdout
+
+        path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
+        with open(path, encoding="utf-8") as f:
+            records = [json.loads(line) for line in f if line.strip()]
+        assert not any(r.get("content") == "/invite" for r in records)
+        human = [r for r in records if r.get("from") != "system"]
+        assert human[-1]["content"] == "hello"
