@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.8.0
+
+- **`follow-all` opt-in for shared threads**: `agent-peer thread <id> --timeout N --follow`
+  marks a gated participant to receive every other participant's post to that thread, not
+  just explicit `@mention`s - a standing preference that persists across later peeks until
+  `--leave`. Costs one native push per message while active (disclosed as a real,
+  per-message cost, not the default recommendation).
+- Fixed: a native push to a target whose delivery takes longer than ~200ms (e.g. a
+  `codex queue` delivery, which spawns a separate process and can take over a second even
+  when healthy) could be silently dropped - the sending process's own background delivery
+  was cut short before it finished. The delivery window is now generous enough for a
+  genuinely slow-but-successful target while still bounded overall.
+
 ## 0.7.1
 
 - A native push delivered by a shared thread now carries its own reply instructions -
