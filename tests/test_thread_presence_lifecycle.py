@@ -239,7 +239,7 @@ class PresenceLifecycleTest(unittest.TestCase):
                 wait_until(lambda: "@peg hi again" in server.text(), timeout=5),
                 "dead peek + mention must knock",
             )
-            self.assertFalse(_presence(self.home, "t11")["peg"].get("left"), "knock must restore")
+            self.assertTrue(_presence(self.home, "t11")["peg"].get("left"), "knock must not restore")
         finally:
             server.close()
 
@@ -288,7 +288,7 @@ class PresenceLifecycleTest(unittest.TestCase):
                 wait_until(lambda: "@sal hi" in server.text(), timeout=5),
                 "exact @sal must knock through soft-leave",
             )
-            self.assertFalse(_presence(self.home, "t10")["sal"].get("left"), "knock must restore")
+            self.assertTrue(_presence(self.home, "t10")["sal"].get("left"), "knock must not restore")
         finally:
             server.close()
 

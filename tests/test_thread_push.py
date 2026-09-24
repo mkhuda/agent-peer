@@ -219,7 +219,9 @@ class ThreadPushTest(unittest.TestCase):
             "left + mention must knock the managed inbox",
         )
 
-    def test_soft_leave_knock_restores(self):
+    def test_soft_leave_knock_no_restore(self):
+        # 0030 doorbell presence: the knock rings but never enrolls - left
+        # stays left, so consecutive mentions keep knocking reliably.
         server = self._native_session("ned")
         try:
             run_cli(["thread", "t1", "--name", "ned", "--timeout", "1"], self.home)
@@ -233,9 +235,15 @@ class ThreadPushTest(unittest.TestCase):
                 wait_until(lambda: "@ned urgent" in server.text(), timeout=5),
                 "mention must knock through soft-leave",
             )
-            self.assertFalse(
-                _presence(self.home, "t1")["ned"].get("left"), "knock must restore presence"
+            self.assertTrue(
+                _presence(self.home, "t1")["ned"].get("left"), "knock must not restore presence"
             )
+            self._post("t1", "bob", "@ned second call")
+            self.assertTrue(
+                wait_until(lambda: "@ned second call" in server.text(), timeout=5),
+                "consecutive mention must knock again, no parked-active trap",
+            )
+            self.assertTrue(_presence(self.home, "t1")["ned"].get("left"), "still left after two knocks")
         finally:
             server.close()
 

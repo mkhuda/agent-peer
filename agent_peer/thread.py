@@ -103,16 +103,15 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     never do - they read the room stream via their own poll, and the
     socket is the out-of-room intercom, never a second room speaker.
     Only two paths knock: a soft-left member explicitly mentioned
-    (restored to active by the knock), and a mesh session with no
-    presence entry at all explicitly mentioned (one-shot, never
-    enrolled - knock is not an invite)."""
+    (left untouched - knock is a doorbell, not an enrollment), and a
+    mesh session with no presence entry at all explicitly mentioned
+    (one-shot, never enrolled - knock is not an invite)."""
     try:
         sessions = get_active_sessions()
     except Exception:
         sessions = []
     presence = read_thread_presence(thread_id)
     targets = []
-    knocked = []
     for name, info in presence.items():
         if not isinstance(info, dict):
             continue
@@ -129,7 +128,6 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         if not _mentions(content, name):
             continue
         targets.append((name, pid))
-        knocked.append(name)
     pushed = {name for name, _ in targets}
     for token in _mention_tokens(content):
         # Mesh-wide summons: exact name, no presence entry (the presence
@@ -141,8 +139,6 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
             continue
         pid = session.get("pid")
         targets.append((token, pid if isinstance(pid, int) else -1))
-    if knocked:
-        restore_thread_presence(thread_id, knocked)
     return targets
 
 
@@ -270,35 +266,6 @@ def leave_thread_presence(thread_id: str, participant: str) -> bool:
             json.dump(presence, f)
         _secure(path)
         return True
-    finally:
-        compat.release_lock(lock_handle)
-
-
-def restore_thread_presence(thread_id: str, names) -> None:
-    """Clear the left flag after a mention knock: the participant is active
-    again with a fresh timestamp (locked; best-effort)."""
-    path = get_thread_presence_path(thread_id)
-    lock_path = get_thread_lock_path(thread_id) + ".presence"
-    lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
-    if lock_handle is None:
-        return
-    try:
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                presence = json.load(f)
-        except Exception:
-            return
-        changed = False
-        for name in names:
-            entry = presence.get(name)
-            if isinstance(entry, dict) and entry.get("left"):
-                entry["left"] = False
-                entry["last_seen"] = time.time()
-                changed = True
-        if changed:
-            with open(path, "w", encoding="utf-8") as f:
-                json.dump(presence, f)
-            _secure(path)
     finally:
         compat.release_lock(lock_handle)
 
