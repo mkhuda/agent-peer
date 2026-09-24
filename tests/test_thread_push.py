@@ -8,8 +8,10 @@ and never fail the poster on dead targets.
 import glob
 import json
 import os
+import shutil
 import socket
 import subprocess
+import tempfile
 import threading
 import time
 import unittest
@@ -390,6 +392,60 @@ class ThreadPushTest(unittest.TestCase):
         log = os.path.join(self.home, ".agent-peer", "threads", "t1.jsonl")
         with open(log, encoding="utf-8") as fh:
             self.assertIn("hello ghosts", fh.read())
+
+    def test_fanout_budget_survives_a_slow_codex_queue_delivery(self):
+        # Real bug, caught live: 0.2s was tuned for a fast socket write, but
+        # a codex-queue delivery spawns a whole separate `codex` process and
+        # measured ~1.3s on a healthy, successful call - the poster's own
+        # daemon thread was getting killed mid-flight before the subprocess
+        # finished, silently dropping the push. Reproduces the real code
+        # path (a fake, deliberately slow `codex` executable on PATH) rather
+        # than mocking - mocking send_message wouldn't cross the subprocess
+        # boundary `_post` runs the poster in.
+        from unittest import mock
+
+        bin_dir = tempfile.mkdtemp(prefix="fake-codex-bin-")
+        fake_codex = os.path.join(bin_dir, "codex")
+        with open(fake_codex, "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\nsleep 1.3\necho '{}'\n")
+        os.chmod(fake_codex, 0o755)
+
+        sessions_dir = os.path.join(self.home, ".claude", "sessions")
+        os.makedirs(sessions_dir, exist_ok=True)
+        proc = subprocess.Popen(["sleep", "5"])
+        try:
+            with open(os.path.join(sessions_dir, f"{proc.pid}.json"), "w", encoding="utf-8") as fh:
+                json.dump(
+                    {
+                        "name": "codex-fake",
+                        "status": "idle",
+                        "agentType": "CODEX",
+                        "codexThreadId": "test-thread-uuid",
+                        "managedByAgentPeer": False,
+                    },
+                    fh,
+                )
+            with open(os.path.join(sessions_dir, f"{proc.pid}.test.key"), "w", encoding="utf-8") as fh:
+                json.dump({"peerToken": "t"}, fh)
+            path = os.path.join(self.home, ".agent-peer", "threads", "t1.presence.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump({"codex-fake": {"pid": 999999, "last_seen": time.time(), "left": True}}, fh)
+
+            with mock.patch.dict(os.environ, {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", "")}):
+                t0 = time.time()
+                self._post("t1", "bob", "@codex-fake urgent")
+                elapsed = time.time() - t0
+
+            log = os.path.join(self.home, ".agent-peer", "inboxes", "codex-fake.jsonl")
+            self.assertTrue(
+                wait_until(lambda: os.path.exists(log) and "@codex-fake urgent" in open(log).read(), timeout=6),
+                f"a ~1.3s codex-queue delivery must still land within the fanout budget (post took {elapsed:.2f}s)",
+            )
+        finally:
+            proc.terminate()
+            proc.wait(timeout=5)
+            shutil.rmtree(bin_dir, ignore_errors=True)
 
     def test_busy_active_silent_left_knock_rings(self):
         # Busy no longer gates anything for actives (they are poll-only);

@@ -17,7 +17,14 @@ from .registry import get_active_sessions
 from . import compat
 
 # Total wall-time budget for one fanout across all concurrent workers.
-FANOUT_BUDGET_SECONDS = 0.2
+# Real bug, caught live: 0.2s was tuned for a fast socket write (a native
+# Claude Code push), but a codex-queue delivery spawns a whole separate
+# `codex` process and measured ~1.3s even on a healthy, successful call -
+# well past 0.2s, so the poster's own daemon thread got killed mid-flight
+# before delivery completed, silently dropping the push. 3s gives that
+# room while still bounding a poster's worst-case delay to a few seconds
+# rather than hanging indefinitely on a genuinely dead/hung target.
+FANOUT_BUDGET_SECONDS = 3.0
 
 
 def _secure(path: str):
