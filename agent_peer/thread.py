@@ -162,7 +162,10 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         targets = fanout_targets(thread_id, sender, content)
         if not targets:
             return
-        frame = f"[thread: {thread_id} #{seq} from {sender}]: {content}"
+        frame = (
+            f"[thread: {thread_id} #{seq} from {sender}]: {content}\n"
+            f'(Reply in this thread: agent-peer send --thread {thread_id} "...")'
+        )
         workers = []
         for name, pid in targets:
             worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender), daemon=True)

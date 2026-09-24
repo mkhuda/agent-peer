@@ -247,6 +247,29 @@ class ThreadPushTest(unittest.TestCase):
         finally:
             server.close()
 
+    def test_push_frame_includes_reply_routing_instruction(self):
+        # 0034: a session that never read the skill must still be able to
+        # tell, from the delivered frame alone, the exact command to reply
+        # into the thread rather than answering back 1-to-1.
+        server = self._native_session("ren")
+        try:
+            run_cli(["thread", "t1", "--name", "ren", "--timeout", "1"], self.home)
+            run_cli(["thread", "t1", "--name", "ren", "--leave"], self.home)
+            self._post("t1", "bob", "@ren check this out")
+            self.assertTrue(
+                wait_until(lambda: "@ren check this out" in server.text(), timeout=5),
+                "mention must knock through",
+            )
+            # server.text() is the raw JSON-over-the-wire frame - quotes in
+            # the reply command are JSON-escaped there.
+            self.assertIn(
+                'agent-peer send --thread t1 \\"...\\"',
+                server.text(),
+                "frame must carry the exact reply command, not just the thread id",
+            )
+        finally:
+            server.close()
+
     def test_rejoin_replays_backlog(self):
         run_cli(["thread", "t1", "--name", "rick", "--timeout", "1"], self.home)
         run_cli(["thread", "t1", "--name", "rick", "--leave"], self.home)
