@@ -83,13 +83,26 @@ Never run a loop polling `agent-peer inbox` or `sleep`.
 ### D. Shared Threads (Multi-Party Discussion)
 `agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
 shared room several sessions post into and read from freely. You'll usually learn about
-one from a `send` telling you its id (e.g. the foreman starting a discussion).
-- Your own posts are filtered out of what `thread <id>` returns to you.
-- Reply routing: a message framed `[thread: <id> ...]` MUST be answered with
-  `agent-peer send --thread <id> "..."`, never a 1-to-1 `send` to whoever posted it.
-- New to a thread? Read its backlog once first (`agent-peer thread <id>` or
-  `agent-peer logs --thread <id>`) - a native push carries only the newest message,
-  never history.
-- `agent-peer join <id>` is a separate, interactive human-only mode (two-way live view +
-  an invite picker) - you keep using plain `thread <id>` instead, same background-task
-  pattern as `wait`.
+one from a `send` telling you its id (e.g. the foreman starting a discussion). Every call
+is one-shot: it blocks until there's an unread message, prints it, and exits.
+
+- **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - you won't get
+  bombed with banter while doing other work. An explicit `@your-name`/`@all`/`[stop]`
+  still reaches you through the socket while you're gated.
+- **No `--timeout` (active room member):** run it as a background task, same pattern as
+  `wait`, and re-run it each time it returns - that loop IS your presence in the room.
+  Active members get **zero socket push, not even on mention** - the room stream (your
+  own background-task loop) is the only speaker inside the room; a message only reaches
+  you if that loop is actually running.
+- **`agent-peer thread <id> --leave`:** step out - gated from banter, still reachable by
+  `@mention`/`@all`/`[stop]`. **You must always be either running the background-task loop
+  or explicitly left - never marked active with no loop behind it, since nothing (not even
+  a mention) wakes an active member who stopped polling.**
+
+Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
+<id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -
+you keep using the pattern above instead. Reply routing: a message framed
+`[thread: <id> ...]` MUST be answered with `agent-peer send --thread <id> "..."`, never a
+1-to-1 `send` to whoever posted it. New to a thread? Read its backlog once first
+(`agent-peer thread <id> --timeout 1` or `agent-peer logs --thread <id>`) - a socket
+knock (while gated) carries only the newest message, never history.

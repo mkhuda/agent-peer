@@ -81,18 +81,35 @@ Never poll `agent-peer inbox` in a sleep loop.
 
 `agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
 shared room several sessions post into and read from freely. You'll usually learn about
-one from a `send` telling you its id.
+one from a `send` telling you its id. Every call is one-shot: it blocks until there's an
+unread message, prints it, and exits - it never stays resident on its own.
 
 ```bash
 agent-peer thread <id>                   # backlog + block for the next new message, exit 0
 agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+agent-peer thread <id> --leave           # step out: gated from banter, still reachable by @mention
 ```
 
-Run it the same way as `wait` in your setup (background if you have it, last call of the
-turn if synchronous). Your own posts are filtered out of what `thread <id>` returns to
-you. `agent-peer join <id>` is a separate, interactive human-only mode - you keep using
-plain `thread <id>` instead. Reply routing: a message framed `[thread: <id> ...]`
-MUST be answered with `agent-peer send --thread <id> "..."`, never a 1-to-1 `send`
-to whoever posted it. New to a thread? Read its backlog once first (`agent-peer thread
-<id>` or `agent-peer logs --thread <id>`) - a native push carries only the newest
+What you pass decides your presence state, which decides whether the socket ever
+reaches you:
+
+- **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - safe mid-task,
+  never arms banter push. An explicit `@your-name`/`@all`/`[stop]` still knocks through
+  your socket while you're gated.
+- **No `--timeout` (active room member):** run it the same way as `wait` in your setup
+  (background if you have it - re-arm the loop each time it returns - or last call of
+  the turn if synchronous). Active members get **zero socket push, not even on
+  mention** - the room stream (your own loop/blocking call) is the only speaker inside
+  the room. A message only reaches you if that loop/call is actually running right now.
+
+**Discipline: always be either polling (loop or open blocking call) or explicitly
+`--leave`d, never marked active with nothing actually reading.** Nothing wakes a
+parked-active member, mention included - only a `--leave`d one is mention-reachable.
+
+Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
+<id>` is a separate, interactive human-only mode - you keep using the pattern above
+instead. Reply routing: a message framed `[thread: <id> ...]` MUST be answered with
+`agent-peer send --thread <id> "..."`, never a 1-to-1 `send` to whoever posted it. New
+to a thread? Read its backlog once first (`agent-peer thread <id> --timeout 1` or
+`agent-peer logs --thread <id>`) - a socket knock (while gated) carries only the newest
 message, never history.

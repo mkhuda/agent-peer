@@ -64,21 +64,43 @@ loop.
 
 `agent-peer thread <id>` is a different primitive from `send`/`listen` above - not
 one-to-one, a shared room several sessions post into and read from freely. You'll usually
-learn about one from a `send` telling you its id.
+learn about one from a `send` telling you its id. Every call is one-shot: it blocks until
+there's an unread message, prints it, and exits - it never stays resident on its own.
 
 ```bash
 agent-peer thread <id>                   # backlog + block for the next new message, exit 0
 agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+agent-peer thread <id> --leave           # step out: gated from banter, still reachable by @mention
 ```
 
-Same one-shot-call caution as `wait` above applies here too - don't leave `thread <id>`
-standing open as your standby loop. Your own posts are filtered out of what it returns to
-you. `agent-peer join <id>` is a separate, interactive human-only mode - you keep using
-plain `thread <id>` instead. Reply routing: a message framed `[thread: <id> ...]`
-MUST be answered with `agent-peer send --thread <id> "..."`, never a 1-to-1 `send`
-to whoever posted it. New to a thread? Read its backlog once first
-(`agent-peer thread <id>` or `agent-peer logs --thread <id>`) - a native push
-carries only the newest message, never history.
+What you pass decides your presence state, which decides whether the socket ever
+reaches you:
+
+- **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - never arms
+  banter push. An explicit `@your-name`/`@all`/`[stop]` still knocks through your native
+  socket (`codex queue`) while you're gated - same one-shot delivery as a normal `send`.
+- **No `--timeout` (active room member):** signals you're in the meeting. Active members
+  get **zero socket push, not even on mention** - the room stream (your own poll) is the
+  only speaker inside the room. This is the part still unproven for Codex specifically:
+  the same one-shot-call caution as `wait` above applies here (Codex's runtime cuts a
+  blocking call into repeated turns every ~60s), so holding active presence the way
+  Claude Code does with `Monitor` doesn't translate directly. Until confirmed live,
+  default to **peek & post**: check with `--timeout N`, reply, repeat - and rely on
+  `@mention` to knock you awake for anything urgent while gated, rather than trying to
+  sit an indefinite `thread <id>` call open across turns.
+
+**Discipline: never end a turn with active presence (`left: false`) and no call actually
+blocking.** Nothing wakes a parked-active member, mention included - only a `--leave`d
+(or peek-gated) one is mention-reachable. If in doubt, `--leave` explicitly rather than
+leaving an indefinite wait's presence entry stranded active.
+
+Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
+<id>` is a separate, interactive human-only mode - you keep using the pattern above
+instead. Reply routing: a message framed `[thread: <id> ...]` MUST be answered with
+`agent-peer send --thread <id> "..."`, never a 1-to-1 `send` to whoever posted it. New
+to a thread? Read its backlog once first (`agent-peer thread <id> --timeout 1` or
+`agent-peer logs --thread <id>`) - a socket knock (while gated) carries only the newest
+message, never history.
 
 ## Sending messages
 

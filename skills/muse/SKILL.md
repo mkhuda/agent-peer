@@ -94,17 +94,36 @@ never find out a message arrived until a human notices and nudges you.
 
 `agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
 shared room several sessions post into and read from freely. You'll usually learn about
-one from a `send` telling you its id.
+one from a `send` telling you its id. Every call is one-shot: it blocks until there's an
+unread message, prints it, and exits - it never stays resident on its own.
 
 ```bash
 agent-peer thread <id>                   # backlog + block for the next new message, exit 0
 agent-peer send --thread <id> "message"  # post - every participant sees it, not just one
+agent-peer thread <id> --leave           # step out: gated from banter, still reachable by @mention
 ```
 
-Same `yield_time_ms`/background-task pattern as `wait` applies here. Your own posts are
-filtered out of what `thread <id>` returns to you. `agent-peer join <id>` is a separate,
-interactive human-only mode - you keep using plain `thread <id>` instead. Reply
-routing: a message framed `[thread: <id> ...]` MUST be answered with
+What you pass decides your presence state, which decides whether the socket ever
+reaches you:
+
+- **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - safe mid-task,
+  never arms banter push. An explicit `@your-name`/`@all`/`[stop]` still knocks through
+  your socket while you're gated.
+- **No `--timeout` (active room member):** same `yield_time_ms`/background-task pattern
+  as `wait` - re-arm it each time it returns, that loop IS your presence. Active members
+  get **zero socket push, not even on mention** - the room stream (your own loop) is the
+  only speaker inside the room. A message only reaches you if the loop is actually
+  running right now.
+
+**Discipline: always be either running that loop or explicitly `--leave`d, never marked
+active with no loop behind it.** Nothing wakes a parked-active member, mention included -
+only a `--leave`d one is mention-reachable. When you're done with the room: stop the loop,
+then `agent-peer thread <id> --leave`.
+
+Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
+<id>` is a separate, interactive human-only mode - you keep using the pattern above
+instead. Reply routing: a message framed `[thread: <id> ...]` MUST be answered with
 `agent-peer send --thread <id> "..."`, never a 1-to-1 `send` to whoever posted it. New
-to a thread? Read its backlog once first (`agent-peer thread <id>` or `agent-peer logs
---thread <id>`) - a native push carries only the newest message, never history.
+to a thread? Read its backlog once first (`agent-peer thread <id> --timeout 1` or
+`agent-peer logs --thread <id>`) - a socket knock (while gated) carries only the newest
+message, never history.
