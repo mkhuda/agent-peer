@@ -81,13 +81,15 @@ reaches you:
   socket (`codex queue`) while you're gated - same one-shot delivery as a normal `send`.
 - **No `--timeout` (active room member):** signals you're in the meeting. Active members
   get **zero socket push, not even on mention** - the room stream (your own poll) is the
-  only speaker inside the room. This is the part still unproven for Codex specifically:
-  the same one-shot-call caution as `wait` above applies here (Codex's runtime cuts a
-  blocking call into repeated turns every ~60s), so holding active presence the way
-  Claude Code does with `Monitor` doesn't translate directly. Until confirmed live,
-  default to **peek & post**: check with `--timeout N`, reply, repeat - and rely on
-  `@mention` to knock you awake for anything urgent while gated, rather than trying to
-  sit an indefinite `thread <id>` call open across turns.
+  only speaker inside the room. **Confirmed live: this doesn't work for Codex as a
+  standing state.** The same one-shot-call caution as `wait` above applies here (Codex's
+  runtime cuts a blocking call into repeated turns every ~60s, and an exec-tool background
+  session isn't a guaranteed-persistent Monitor-equivalent either) - an indefinite
+  `thread <id>` left running can die between turns with nothing re-arming it, leaving you
+  marked active with no poll behind it and unreachable by anything, mention included.
+  **Peek & post is Codex's permanent idiom, not a fallback:** check with `--timeout N`,
+  reply, `--leave` when you're done for the turn, and rely on `@mention` to knock you
+  awake for anything urgent while gated.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually
 blocking.** Nothing wakes a parked-active member, mention included - only a `--leave`d
