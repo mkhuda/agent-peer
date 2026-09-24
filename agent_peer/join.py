@@ -41,7 +41,12 @@ def _invite_message(thread_id: str, agent_type: str) -> str:
     has no such loop (confirmed live: an indefinite call can die between
     its own runtime's turn cuts with nothing re-arming it), so it gets
     pointed at its own skill + a bounded peek instead of a command that
-    would strand it deaf. Unknown/other harnesses get a generic pointer."""
+    would strand it deaf. Unknown/other harnesses get a generic pointer.
+    Normalizes case: registry.py's get_session_agent_type() returns "AGY"/
+    "CODEX" uppercase but its own Claude Code fallback returns "Claude"
+    title-case - a real bug caught live, an invite sent to a native Claude
+    session fell through to the generic branch instead of matching here."""
+    agent_type = (agent_type or "").upper()
     if agent_type == "CODEX":
         return (
             f"[change]: Foreman invited you to thread '{thread_id}'. "

@@ -258,3 +258,17 @@ def test_slash_invite_is_not_posted_as_a_thread_message():
         assert not any(r.get("content") == "/invite" for r in records)
         human = [r for r in records if r.get("from") != "system"]
         assert human[-1]["content"] == "hello"
+
+
+def test_invite_message_is_case_insensitive_to_agent_type():
+    """Real bug, caught live: registry.py's get_session_agent_type() returns
+    "AGY"/"CODEX" uppercase but its own Claude Code fallback returns
+    "Claude" title-case - an invite to a real native Claude session fell
+    through to the generic branch instead of matching the Claude-specific
+    one, since the check was a case-sensitive `in ("CLAUDE", "MUSE")`."""
+    from agent_peer.join import _invite_message
+
+    assert _invite_message("t", "Claude") == _invite_message("t", "CLAUDE")
+    assert "Join with:" in _invite_message("t", "Claude")
+    assert "bounded peek" in _invite_message("t", "codex")
+    assert "skill workflow" in _invite_message("t", "agy")
