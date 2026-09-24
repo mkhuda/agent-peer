@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.7.0
+
+- **Smarter invite picker in `join`**: the picker now opens automatically whenever a
+  room has no other active member (not just on a brand-new thread), and only offers
+  sessions that aren't already active - a soft-left one (e.g. one just peeking) stays
+  a legitimate re-invite target instead of disappearing from the list. `/invite` inside
+  the live chat re-opens the picker on demand without quitting.
+- **Harness-aware invite text**: an invite DM no longer tells every recipient to run the
+  same indefinite wait command - a harness without a persistent poll loop gets pointed at
+  its own bounded-peek idiom instead, so it can't get stranded unreachable.
+- Fixed: an invite could silently fall back to generic wording for a real native Claude
+  Code session, because the session's own reported engine name didn't match the
+  case-sensitive check.
+- Fixed: a transient filesystem error (e.g. a full disk) while touching thread presence
+  could permanently kill the live view's background updates for the rest of that session
+  instead of just skipping one refresh.
+- `agent-peer thread --help` / `agent-peer join --help` now state plainly that an
+  indefinite wait must be looped to stay useful, and point at the per-harness skill for
+  how - previously only the skill docs said this, so any usage that skipped them missed
+  it entirely.
+
 ## 0.6.0
 
 - **Shared threads**: multi-party rooms on top of 1-to-1 messaging. Post with
