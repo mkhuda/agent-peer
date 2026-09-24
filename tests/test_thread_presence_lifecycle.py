@@ -176,7 +176,9 @@ class PresenceLifecycleTest(unittest.TestCase):
         finally:
             server.close()
 
-    def test_join_preserves_active_presence(self):
+    def test_join_exit_marks_left(self):
+        # Clean EOF departure is a real leave (not a parked-active): the
+        # session joins (event), then leaves (event) on the way out.
         script = (
             f"import sys; sys.path.insert(0, {REPO_ROOT!r}); "
             "from agent_peer.join import run_join; run_join('t3', 'foreman')"
@@ -193,8 +195,13 @@ class PresenceLifecycleTest(unittest.TestCase):
         )
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertIn("foreman", _presence(self.home, "t3"))
-        self.assertFalse(
-            _presence(self.home, "t3")["foreman"].get("left"), "interactive join is active presence, never a peek"
+        self.assertTrue(
+            _presence(self.home, "t3")["foreman"].get("left"), "clean join exit must mark left"
+        )
+        events = _events(_records(self.home, "t3"))
+        self.assertEqual(
+            [(e.get("event"), e.get("who")) for e in events],
+            [("join", "foreman"), ("leave", "foreman")],
         )
 
     def test_active_never_pushed_even_on_mention(self):

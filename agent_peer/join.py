@@ -9,7 +9,7 @@ import threading
 from .protocol import get_thread_path
 from .registry import get_active_sessions
 from .sender import send_message
-from .thread import read_thread, append_thread_message, touch_thread_presence
+from .thread import read_thread, append_thread_message, touch_thread_presence, leave_thread_presence
 from .logs import format_thread_entry, format_thread_presence_header, supports_color
 from .picker import pick_multi
 from .rawline import LineEditor, read_message
@@ -151,4 +151,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     finally:
         stop_event.set()
         poller.join(timeout=2)
+        # A real departure, not just a stopped screen: mark left (emits
+        # the system leave event) so the notice below is true.
+        leave_thread_presence(thread_id, participant)
         print(f"\nLeft the thread. To rejoin, run: agent-peer join {thread_id}")

@@ -100,8 +100,10 @@ def test_run_join_prints_backlog_sends_lines_and_exits_on_eof():
             records = [json.loads(line) for line in f if line.strip()]
         joins = [r for r in records if r.get("from") == "system" and r.get("event") == "join"]
         assert len(joins) == 1 and joins[0]["who"] == "foreman"  # 0031: joining emits one event
-        assert records[-1]["from"] == "foreman"
-        assert records[-1]["content"] == "hello from foreman"
+        assert records[-1]["from"] == "system" and records[-1]["event"] == "leave"
+        human = [r for r in records if r.get("from") != "system"]
+        assert human[-1]["from"] == "foreman"
+        assert human[-1]["content"] == "hello from foreman"
 
 
 def test_rejoin_shows_the_foremans_own_past_messages_in_backlog():
@@ -133,7 +135,9 @@ def test_run_join_prints_the_sent_message_once_not_twice():
         path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
         with open(path, encoding="utf-8") as f:
             records = [json.loads(line) for line in f if line.strip()]
-        assert records[-1]["from"] == "foreman" and records[-1]["content"] == "a message from me"
+        assert records[-1]["from"] == "system" and records[-1]["event"] == "leave"
+        human = [r for r in records if r.get("from") != "system"]
+        assert human[-1]["from"] == "foreman" and human[-1]["content"] == "a message from me"
 
 
 def test_run_join_shows_a_live_message_from_another_agent_while_waiting():
