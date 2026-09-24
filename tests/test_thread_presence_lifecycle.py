@@ -84,6 +84,26 @@ def _write_presence(home, thread_id, presence):
         json.dump(presence, fh)
 
 
+def _records(home, thread_id):
+    path = os.path.join(home, ".agent-peer", "threads", f"{thread_id}.jsonl")
+    if not os.path.exists(path):
+        return []
+    out = []
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if line:
+                try:
+                    out.append(json.loads(line))
+                except Exception:
+                    continue
+    return out
+
+
+def _events(records):
+    return [r for r in records if r.get("from") == "system"]
+
+
 class PresenceLifecycleTest(unittest.TestCase):
     def setUp(self):
         self._home_cm = isolated_home()
@@ -289,6 +309,66 @@ class PresenceLifecycleTest(unittest.TestCase):
                 "exact @sal must knock through soft-leave",
             )
             self.assertTrue(_presence(self.home, "t10")["sal"].get("left"), "knock must not restore")
+        finally:
+            server.close()
+
+
+    def test_leave_and_rejoin_emit_exactly_once(self):
+        waiter = spawn_cli(["thread", "ev1", "--name", "amy"], self.home)
+        self.procs.append(waiter)
+        self.assertTrue(
+            wait_until(lambda: "amy" in _presence(self.home, "ev1"), timeout=5),
+            "waiter never touched presence",
+        )
+        stop_cli(waiter)
+        self.procs.remove(waiter)
+        run_cli(["thread", "ev1", "--name", "amy", "--leave"], self.home)
+        run_cli(["thread", "ev1", "--name", "amy", "--leave"], self.home)
+        events = _events(_records(self.home, "ev1"))
+        self.assertEqual(
+            [(e.get("event"), e.get("who")) for e in events],
+            [("join", "amy"), ("leave", "amy")],
+            "one join + one leave, repeat leave emits nothing",
+        )
+        self.assertEqual(events[0].get("type"), "event")
+        self.assertIn("amy", events[0].get("content", ""))
+        self.assertEqual(
+            [e.get("seq") for e in events], sorted(e.get("seq") for e in events), "seq monotonic"
+        )
+
+    def test_rearm_emits_zero_dupes(self):
+        for _ in range(2):
+            waiter = spawn_cli(["thread", "ev2", "--name", "bob"], self.home)
+            self.procs.append(waiter)
+            self.assertTrue(
+                wait_until(lambda: "bob" in _presence(self.home, "ev2"), timeout=5),
+                "waiter never touched presence",
+            )
+            stop_cli(waiter)
+            self.procs.remove(waiter)
+        events = _events(_records(self.home, "ev2"))
+        self.assertEqual(len(events), 1, "re-arm refresh must not re-emit join")
+        self.assertEqual(events[0].get("event"), "join")
+
+    def test_peek_never_emits_join_event(self):
+        run_cli(["thread", "ev3", "--name", "peg", "--timeout", "1"], self.home)
+        run_cli(["thread", "ev3", "--name", "peg", "--timeout", "1"], self.home)
+        self.assertEqual(_events(_records(self.home, "ev3")), [], "peek is never an arrival")
+
+    def test_system_event_triggers_zero_push(self):
+        server = self._native_session("nox")
+        try:
+            _write_presence(self.home, "ev4", {"nox": {"pid": 424242, "last_seen": time.time()}})
+            waiter = spawn_cli(["thread", "ev4", "--name", "jo"], self.home)
+            self.procs.append(waiter)
+            self.assertTrue(
+                wait_until(lambda: _events(_records(self.home, "ev4")), timeout=5),
+                "join event never appended",
+            )
+            stop_cli(waiter)
+            self.procs.remove(waiter)
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "system events must never fanout")
         finally:
             server.close()
 

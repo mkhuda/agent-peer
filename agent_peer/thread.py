@@ -218,27 +218,67 @@ def _write_thread_cursor(thread_id: str, participant: str, seq: int):
     _secure(path)
 
 
+def _append_system_event(thread_id: str, event: str, participant: str) -> None:
+    """Room-stream lifecycle notice (0031): a state transition already
+    decided by the caller, recorded as a plain log line. Raw locked
+    append - never append_thread_message(), which would fanout."""
+    try:
+        ensure_dirs()
+        path = get_thread_path(thread_id)
+        lock_handle = _acquire_thread_lock(get_thread_lock_path(thread_id))
+        if lock_handle is None:
+            return
+        try:
+            last = _read_last_record(path)
+            seq = (last.get("seq", 0) + 1) if last else 1
+            verb = "joined the thread" if event == "join" else "left the thread"
+            record = {
+                "seq": seq,
+                "ts": time.time(),
+                "from": "system",
+                "type": "event",
+                "event": event,
+                "who": participant,
+                "content": f"{participant} {verb}",
+            }
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record) + "\n")
+            _secure(path)
+        finally:
+            compat.release_lock(lock_handle)
+    except Exception:
+        pass  # ambient notice - must never fail the presence update
+
+
 def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
     """Records that `participant` is waiting right now, so a viewer can
     tell "who's listening" from "who has ever posted". `left` marks a peek
-    (timeout-bounded): visible in the room, but gated from banter push."""
+    (timeout-bounded): visible in the room, but gated from banter push.
+    Emits one system join event on genuine activation only (0031)."""
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
     lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
     if lock_handle is None:
         return  # best-effort - skip this update rather than write unlocked
+    emit_join = False
     try:
         try:
             with open(path, "r", encoding="utf-8") as f:
                 presence = json.load(f)
         except Exception:
             presence = {}
+        prior = presence.get(participant)
+        # Gate on the incoming value: a peek (left=True) is never an
+        # arrival, even for a brand-new participant.
+        emit_join = not left and (not isinstance(prior, dict) or prior.get("left"))
         presence[participant] = {"pid": os.getpid(), "last_seen": time.time(), "left": left}
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
     finally:
         compat.release_lock(lock_handle)
+    if emit_join:
+        _append_system_event(thread_id, "join", participant)
 
 
 def leave_thread_presence(thread_id: str, participant: str) -> bool:
@@ -261,13 +301,18 @@ def leave_thread_presence(thread_id: str, participant: str) -> bool:
         entry = presence.get(participant)
         if not isinstance(entry, dict):
             return False
+        emit_leave = not entry.get("left")
         entry["left"] = True
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
-        return True
     finally:
         compat.release_lock(lock_handle)
+    # Decided inside, emitted outside: never hold the presence lock
+    # while taking the thread lock.
+    if emit_leave:
+        _append_system_event(thread_id, "leave", participant)
+    return True
 
 
 def read_thread_presence(thread_id: str) -> Dict[str, Any]:

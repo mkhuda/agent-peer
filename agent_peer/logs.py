@@ -393,7 +393,11 @@ def format_thread_entry(record: dict, use_color: bool = True, viewer: Optional[s
     one-to-one) - a simpler card than format_log_entry's inbox cards.
     `viewer` (the reader's own participant name) gets a visually distinct
     card - a double divider and a different accent color - so a busy
-    thread stays easy to scan for "did I already say that" at a glance."""
+    thread stays easy to scan for "did I already say that" at a glance.
+    System lifecycle events (0031) render as a dimmed ambient line."""
+    if record.get("from") == "system" or record.get("type") == "event":
+        line = f"— {record.get('content', '')} —"
+        return f"{DIM}{line}{RESET}\n" if use_color else f"{line}\n"
     seq = record.get("seq")
     time_str = time.strftime("%H:%M:%S", time.localtime(record.get("ts", 0)))
     sender = record.get("from", "unknown")

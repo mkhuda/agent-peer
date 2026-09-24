@@ -98,7 +98,8 @@ def test_run_join_prints_backlog_sends_lines_and_exits_on_eof():
         path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
         with open(path, encoding="utf-8") as f:
             records = [json.loads(line) for line in f if line.strip()]
-        assert records[-1]["seq"] == 2
+        joins = [r for r in records if r.get("from") == "system" and r.get("event") == "join"]
+        assert len(joins) == 1 and joins[0]["who"] == "foreman"  # 0031: joining emits one event
         assert records[-1]["from"] == "foreman"
         assert records[-1]["content"] == "hello from foreman"
 
@@ -126,12 +127,13 @@ def test_run_join_prints_the_sent_message_once_not_twice():
         result = _run_join_piped(home, "sync", "foreman", "a message from me\n")
         assert result.returncode == 0, result.stderr
         assert result.stdout.count("a message from me") == 1
-        assert result.stdout.count("#2") == 1  # the sent card's own seq marker, printed once
+        assert result.stdout.count("#3") == 1  # sent card seq (join event took #2, 0031)
+        assert "joined the thread" in result.stdout
 
         path = os.path.join(home, ".agent-peer", "threads", "sync.jsonl")
         with open(path, encoding="utf-8") as f:
             records = [json.loads(line) for line in f if line.strip()]
-        assert records[-1]["seq"] == 2 and records[-1]["content"] == "a message from me"
+        assert records[-1]["from"] == "foreman" and records[-1]["content"] == "a message from me"
 
 
 def test_run_join_shows_a_live_message_from_another_agent_while_waiting():
