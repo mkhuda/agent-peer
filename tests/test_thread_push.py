@@ -9,6 +9,7 @@ import glob
 import json
 import os
 import socket
+import subprocess
 import threading
 import time
 import unittest
@@ -126,10 +127,13 @@ class ThreadPushTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         return proc
 
-    def _native_session(self, name, status="idle"):
+    def _native_session(self, name, status="idle", pid=None):
         """Craft a native-Claude-style registry entry (not managed) whose
-        socket is a dummy server. Returns the server (caller must close)."""
-        pid = os.getpid()  # alive by definition
+        socket is a dummy server. Returns the server (caller must close).
+        `pid` defaults to this test process's own (alive by definition) -
+        pass a different real, alive pid when a test needs two simultaneous
+        native sessions, since one pid can only own one session file."""
+        pid = pid or os.getpid()
         sock_path = os.path.join(self.home, f"{name}.sock")
         server = DummyNativeServer(sock_path)
         sessions = os.path.join(self.home, ".claude", "sessions")
@@ -269,6 +273,87 @@ class ThreadPushTest(unittest.TestCase):
             )
         finally:
             server.close()
+
+    def test_follow_all_receives_banter_without_mention(self):
+        server = self._native_session("fin")
+        try:
+            run_cli(["thread", "t1", "--name", "fin", "--timeout", "1", "--follow"], self.home)
+            self.assertTrue(_presence(self.home, "t1")["fin"].get("follow_all"))
+            self._post("t1", "bob", "just chatting, no mention here")
+            self.assertTrue(
+                wait_until(lambda: "just chatting" in server.text(), timeout=5),
+                "follow-all must knock on ordinary banter, no @mention needed",
+            )
+        finally:
+            server.close()
+
+    def test_follow_all_persists_across_a_plain_repeek(self):
+        # A standing opt-in, not a per-call state like `left`: a later peek
+        # without --follow must not silently drop it - Codex re-peeks
+        # constantly and shouldn't have to re-pass --follow every time.
+        run_cli(["thread", "t1", "--name", "kim", "--timeout", "1", "--follow"], self.home)
+        self.assertTrue(_presence(self.home, "t1")["kim"].get("follow_all"))
+        run_cli(["thread", "t1", "--name", "kim", "--timeout", "1"], self.home)
+        self.assertTrue(
+            _presence(self.home, "t1")["kim"].get("follow_all"), "a plain re-peek must not clear follow_all"
+        )
+
+    def test_follow_all_does_not_push_own_post(self):
+        server = self._native_session("gia")
+        try:
+            run_cli(["thread", "t1", "--name", "gia", "--timeout", "1", "--follow"], self.home)
+            self._post("t1", "gia", "talking to myself")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "follow-all must never push a participant their own post")
+        finally:
+            server.close()
+
+    def test_follow_all_sender_match_is_exact_not_substring(self):
+        # Same collision class already fixed for @mention (sam vs sam-2) -
+        # a follow-all participant named codex-7284 must not be treated as
+        # having posted (and thus self-suppressed) by codex-7284-2's post.
+        server = self._native_session("codex-7284")
+        try:
+            run_cli(["thread", "t1", "--name", "codex-7284", "--timeout", "1", "--follow"], self.home)
+            self._post("t1", "codex-7284-2", "hello from a similarly-named session")
+            self.assertTrue(
+                wait_until(lambda: "hello from a similarly-named" in server.text(), timeout=5),
+                "a post from a different, similarly-named sender must still knock",
+            )
+        finally:
+            server.close()
+
+    def test_leave_clears_follow_all(self):
+        run_cli(["thread", "t1", "--name", "hal", "--timeout", "1", "--follow"], self.home)
+        self.assertTrue(_presence(self.home, "t1")["hal"].get("follow_all"))
+        run_cli(["thread", "t1", "--name", "hal", "--leave"], self.home)
+        self.assertFalse(_presence(self.home, "t1")["hal"].get("follow_all"), "--leave must clear follow_all too")
+
+    def test_follow_all_does_not_affect_a_session_never_in_this_thread(self):
+        # 0035 invariant #2: scoped to participants who have touched THIS
+        # thread's presence at least once - an unrelated mesh session is
+        # not swept up just because someone else opted into follow-all.
+        # Two simultaneous native sessions need two distinct, genuinely
+        # alive pids - one process can only register one session file.
+        bystander_proc = subprocess.Popen(["sleep", "5"])
+        follow_server = self._native_session("ivy")
+        bystander_server = self._native_session("jude", pid=bystander_proc.pid)
+        try:
+            run_cli(["thread", "t1", "--name", "ivy", "--timeout", "1", "--follow"], self.home)
+            self._post("t1", "bob", "no mention of anyone")
+            self.assertTrue(
+                wait_until(lambda: "no mention of anyone" in follow_server.text(), timeout=5),
+                "follow-all participant must still get it",
+            )
+            time.sleep(1)
+            self.assertEqual(
+                bystander_server.text(), "", "a session that never touched this thread must stay untouched"
+            )
+        finally:
+            follow_server.close()
+            bystander_server.close()
+            bystander_proc.terminate()
+            bystander_proc.wait(timeout=5)
 
     def test_rejoin_replays_backlog(self):
         run_cli(["thread", "t1", "--name", "rick", "--timeout", "1"], self.home)

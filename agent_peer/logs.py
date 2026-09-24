@@ -371,7 +371,14 @@ def format_thread_presence_header(thread_id: str, use_color: bool = True) -> str
     if not presence:
         return ""
     now = time.time()
-    parts = [f"{name} ({_fmt_age(max(0.0, now - info.get('last_seen', 0)))} ago)" for name, info in sorted(presence.items())]
+    parts = []
+    for name, info in sorted(presence.items()):
+        age = _fmt_age(max(0.0, now - info.get("last_seen", 0)))
+        # 0035: follow-all is a standing state that changes what a gated
+        # member receives - surface it so it's observable, not a hidden
+        # behavior others have to infer from watching what gets through.
+        suffix = " [follow-all]" if isinstance(info, dict) and info.get("follow_all") else ""
+        parts.append(f"{name} ({age} ago){suffix}")
     label = f"Present: {', '.join(parts)}"
     return f"{DIM}{label}{RESET}" if use_color else label
 

@@ -102,10 +102,12 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     """Who gets a socket push for this post. Active members (left=False)
     never do - they read the room stream via their own poll, and the
     socket is the out-of-room intercom, never a second room speaker.
-    Only two paths knock: a soft-left member explicitly mentioned
-    (left untouched - knock is a doorbell, not an enrollment), and a
-    mesh session with no presence entry at all explicitly mentioned
-    (one-shot, never enrolled - knock is not an invite)."""
+    Three paths knock for a gated (left=True) member: an explicit mention
+    (left untouched - knock is a doorbell, not an enrollment), a standing
+    `follow_all` opt-in (0035 - every other participant's post knocks, not
+    just mentions - exact sender-identity comparison, never a substring
+    match), and a mesh session with no presence entry at all explicitly
+    mentioned (one-shot, never enrolled - knock is not an invite)."""
     try:
         sessions = get_active_sessions()
     except Exception:
@@ -125,7 +127,7 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         # A still-running peek already sees the mention via its own poll.
         if compat.is_pid_alive(pid):
             continue
-        if not _mentions(content, name):
+        if not info.get("follow_all") and not _mentions(content, name):
             continue
         targets.append((name, pid))
     pushed = {name for name, _ in targets}
@@ -253,10 +255,14 @@ def _append_system_event(thread_id: str, event: str, participant: str) -> None:
         pass  # ambient notice - must never fail the presence update
 
 
-def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
+def touch_thread_presence(thread_id: str, participant: str, left: bool = False, follow: Optional[bool] = None):
     """Records that `participant` is waiting right now, so a viewer can
     tell "who's listening" from "who has ever posted". `left` marks a peek
     (timeout-bounded): visible in the room, but gated from banter push.
+    `follow` (0035) is a standing opt-in, not a per-call state like `left` -
+    pass `True` to turn it on, leave as `None` to carry forward whatever it
+    was already set to (so a plain re-peek doesn't silently drop it), or
+    `False` to explicitly clear it without a full `--leave`.
     Emits one system join event on genuine activation only (0031)."""
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
@@ -277,7 +283,13 @@ def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
         # Gate on the incoming value: a peek (left=True) is never an
         # arrival, even for a brand-new participant.
         emit_join = not left and (not isinstance(prior, dict) or prior.get("left"))
-        presence[participant] = {"pid": os.getpid(), "last_seen": time.time(), "left": left}
+        follow_all = follow if follow is not None else bool(isinstance(prior, dict) and prior.get("follow_all"))
+        presence[participant] = {
+            "pid": os.getpid(),
+            "last_seen": time.time(),
+            "left": left,
+            "follow_all": follow_all,
+        }
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
@@ -292,7 +304,10 @@ def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
 def leave_thread_presence(thread_id: str, participant: str) -> bool:
     """Step out of the meeting (soft-leave): mark the presence entry left
     so banter skips this participant, while @mention/@all/[stop] can still
-    knock (Phase 6). The cursor is deliberately left alone - rejoining
+    knock (Phase 6). Also clears any standing `follow_all` opt-in (0035) -
+    `--leave` is the one documented way to fully reset, so it must not
+    leave a stale follow-all behind for the next `--leave`-less rejoin to
+    silently inherit. The cursor is deliberately left alone - rejoining
     (`agent-peer thread <id>`) re-touches presence and replays everything
     past last_seq as catch-up. Returns True if the entry exists."""
     path = get_thread_presence_path(thread_id)
@@ -311,6 +326,7 @@ def leave_thread_presence(thread_id: str, participant: str) -> bool:
             return False
         emit_leave = not entry.get("left")
         entry["left"] = True
+        entry["follow_all"] = False
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
@@ -348,13 +364,16 @@ def wait_for_thread_message(
     thread_id: str,
     participant: str,
     timeout: Optional[float] = None,
+    follow: Optional[bool] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """Immediate-backlog-then-poll, like inbox.py's wait_for_message but
     shared. Cursor advances to unread[-1]'s seq (not a fresh re-read, which
     could race a concurrent append and skip it before it's ever returned).
     Timeout-as-intent: a bounded wait is a peek (gated), only an indefinite
-    wait arms full room presence."""
-    touch_thread_presence(thread_id, participant, left=(timeout is not None))
+    wait arms full room presence. `follow` (0035) opts a gated participant
+    into "follow-all" - every other participant's post knocks, not just
+    @mentions - see touch_thread_presence for its carry-forward semantics."""
+    touch_thread_presence(thread_id, participant, left=(timeout is not None), follow=follow)
 
     unread = get_thread_unread(thread_id, participant)
     if unread:

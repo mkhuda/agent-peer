@@ -291,7 +291,8 @@ def cmd_thread(args):
     compat.secure_file(lock_path)
 
     try:
-        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout)
+        follow = True if args.follow else None
+        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow)
         if msgs:
             for msg in msgs:
                 print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}]: {msg.get('content')}")
@@ -481,6 +482,7 @@ def main():
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped; a bounded timeout is just a peek)")
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
+    p_thread.add_argument("--follow", action="store_true", help="Opt in to follow-all: every other participant's post knocks while you're gated, not just @mentions - costs one push per message, standing until --leave (see skills/codex/SKILL.md for the cost trade-off)")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
     p_thread.add_argument("-a", "--all", action="store_true", help="With --interactive: scope the invite picker mesh-wide instead of just this workspace")

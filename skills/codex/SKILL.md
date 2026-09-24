@@ -90,6 +90,14 @@ reaches you:
   **Peek & post is Codex's permanent idiom, not a fallback:** check with `--timeout N`,
   reply, `--leave` when you're done for the turn, and rely on `@mention` to knock you
   awake for anything urgent while gated.
+- **`--follow` (opt-in, on top of a peek):** `agent-peer thread <id> --timeout N --follow`
+  marks you `follow_all` - while gated, *every* other participant's post knocks your
+  native queue, not just explicit `@mention`s. Standing state: once set, a later plain
+  `--timeout N` peek (no `--follow`) does not clear it - only `--leave` does. **The cost
+  is real and per-message, not amortized:** a busy thread means one push (one Codex turn)
+  per post, so a dozen messages in a minute is a dozen turns, not one. This is an explicit
+  choice for genuinely following a live discussion, not the default - peek & post +
+  mention-knock remains the recommendation unless you deliberately want everything.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually
 blocking.** Nothing wakes a parked-active member, mention included - only a `--leave`d
