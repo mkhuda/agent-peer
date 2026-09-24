@@ -260,6 +260,43 @@ def test_slash_invite_is_not_posted_as_a_thread_message():
         assert human[-1]["content"] == "hello"
 
 
+def test_poll_loop_survives_a_bad_iteration():
+    """0033: one failing poll iteration (e.g. transient ENOSPC on the
+    presence lock) must not kill the poller - a later good iteration
+    still delivers, and the thread stays alive."""
+    with isolated_home() as home:
+        script = f"""
+import sys, threading, time
+sys.path.insert(0, {REPO_ROOT!r})
+from unittest import mock
+import agent_peer.join as j
+msg = {{"seq": 7, "from": "ally", "content": "still here"}}
+calls = []
+def fake_read(tid):
+    calls.append(1)
+    if len(calls) == 1:
+        raise OSError(28, "No space left on device")
+    return [msg]
+stop = threading.Event()
+box = [0]
+with mock.patch.object(j, "read_thread", side_effect=fake_read):
+    th = threading.Thread(
+        target=j._poll_loop, args=("tfix3", "me", box, stop, False, None), daemon=True
+    )
+    th.start()
+    time.sleep(1.6)
+    alive = th.is_alive()
+    stop.set()
+    th.join(timeout=3)
+print("ALIVE" if alive else "DEAD")
+print("GOTMSG" if box[0] == 7 else "NOMSG")
+"""
+        result = _run_py(home, script, timeout=10)
+        assert result.returncode == 0, result.stderr
+        assert "ALIVE" in result.stdout, "poller died on a transient iteration error"
+        assert "GOTMSG" in result.stdout, "poller never recovered after the bad iteration"
+
+
 def test_invite_message_is_case_insensitive_to_agent_type():
     """Real bug, caught live: registry.py's get_session_agent_type() returns
     "AGY"/"CODEX" uppercase but its own Claude Code fallback returns

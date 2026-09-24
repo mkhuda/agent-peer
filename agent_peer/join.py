@@ -124,19 +124,22 @@ def _print_live(text: str, editor):
 
 def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor, paused=None):
     while not stop_event.is_set():
-        if paused is not None and paused.is_set():
-            # /invite has curses on screen - printing here would corrupt it.
-            stop_event.wait(0.2)
-            continue
-        for r in read_thread(thread_id):
-            seq = r.get("seq", 0)
-            if seq <= last_seq_box[0]:
+        try:
+            if paused is not None and paused.is_set():
+                # /invite has curses on screen - printing here would corrupt it.
+                stop_event.wait(0.2)
                 continue
-            last_seq_box[0] = seq
-            if r.get("from") == participant:
-                continue  # already visible from your own typed line
-            _print_live(format_thread_entry(r, use_color=use_color, viewer=participant), editor)
-        touch_thread_presence(thread_id, participant, left=False)
+            for r in read_thread(thread_id):
+                seq = r.get("seq", 0)
+                if seq <= last_seq_box[0]:
+                    continue
+                last_seq_box[0] = seq
+                if r.get("from") == participant:
+                    continue  # already visible from your own typed line
+                _print_live(format_thread_entry(r, use_color=use_color, viewer=participant), editor)
+            touch_thread_presence(thread_id, participant, left=False)
+        except Exception as e:
+            print(f"agent-peer: poll tick skipped ({e})", file=sys.stderr)
         stop_event.wait(0.5)
 
 

@@ -257,7 +257,10 @@ def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
     Emits one system join event on genuine activation only (0031)."""
     path = get_thread_presence_path(thread_id)
     lock_path = get_thread_lock_path(thread_id) + ".presence"
-    lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
+    try:
+        lock_handle = _acquire_thread_lock(lock_path, timeout=0.5)
+    except OSError:
+        return
     if lock_handle is None:
         return  # best-effort - skip this update rather than write unlocked
     emit_join = False
@@ -275,6 +278,8 @@ def touch_thread_presence(thread_id: str, participant: str, left: bool = False):
         with open(path, "w", encoding="utf-8") as f:
             json.dump(presence, f)
         _secure(path)
+    except OSError:
+        return
     finally:
         compat.release_lock(lock_handle)
     if emit_join:

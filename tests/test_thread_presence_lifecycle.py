@@ -403,5 +403,54 @@ class MentionTokenTest(unittest.TestCase):
         self.assertFalse(_mentions("general banter", "sam"))
 
 
+class PresenceResilienceTest(unittest.TestCase):
+    def _run_script(self, home, script):
+        env = dict(os.environ, HOME=home)
+        return subprocess.run(
+            [sys.executable, "-c", script],
+            cwd=REPO_ROOT,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=15,
+        )
+
+    def test_touch_swallows_acquire_oserror(self):
+        with isolated_home() as home:
+            before = {"bob": {"pid": 424242, "last_seen": 1700000000.0, "left": False}}
+            _write_presence(home, "tfix", before)
+            script = (
+                "import sys\nsys.path.insert(0, %r)\n"
+                "from unittest import mock\n"
+                "import agent_peer.thread as t\n"
+                "with mock.patch.object(t, '_acquire_thread_lock',"
+                " side_effect=OSError(28, 'No space left on device')):\n"
+                "    t.touch_thread_presence('tfix', 'bob')\n"
+                "print('OK-NO-RAISE')" % REPO_ROOT
+            )
+            result = self._run_script(home, script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("OK-NO-RAISE", result.stdout)
+            self.assertEqual(_presence(home, "tfix"), before, "failed touch must not rewrite presence")
+
+    def test_touch_propagates_non_oserror(self):
+        with isolated_home() as home:
+            patch_script = (
+                "import sys\nsys.path.insert(0, %r)\n"
+                "from unittest import mock\n"
+                "import agent_peer.thread as t\n"
+                "with mock.patch.object(t, '_acquire_thread_lock', side_effect=ValueError('boom')):\n"
+                "    try:\n"
+                "        t.touch_thread_presence('tfix2', 'bob')\n"
+                "    except ValueError:\n"
+                "        print('OK-PROPAGATED')\n"
+                "    else:\n"
+                "        raise SystemExit('FAIL-SWALLOWED')" % REPO_ROOT
+            )
+            result = self._run_script(home, patch_script)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("OK-PROPAGATED", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main()

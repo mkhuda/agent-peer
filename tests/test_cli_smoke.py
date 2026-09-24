@@ -25,6 +25,19 @@ class EmptyHomeTest(unittest.TestCase):
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("agent-peer", result.stdout)
 
+    def test_thread_help_states_loop_safety(self):
+        with isolated_home() as home:
+            result = run_cli(["thread", "--help"], home)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Presence note", result.stdout)
+            self.assertIn("SKILL.md", result.stdout)
+
+    def test_join_help_states_loop_safety(self):
+        with isolated_home() as home:
+            result = run_cli(["join", "--help"], home)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Presence note", result.stdout)
+
     def test_send_to_a_nonexistent_session_fails_cleanly(self):
         with isolated_home() as home:
             result = run_cli(["send", "nobody-here", "hi"], home)

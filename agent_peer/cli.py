@@ -476,10 +476,10 @@ def main():
     p_wait.set_defaults(func=cmd_wait)
 
     # thread - shared multi-party discussion
-    p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time")
+    p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time", epilog="Presence note: an indefinite wait holds active room presence only while this command keeps running - loop it continuously (see skills/<your-harness>/SKILL.md for the exact per-harness idiom).")
     p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
-    p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely)")
+    p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped; a bounded timeout is just a peek)")
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
@@ -487,7 +487,7 @@ def main():
     p_thread.set_defaults(func=cmd_thread)
 
     # join - the human one-door entry: invite + live two-way view
-    p_join = subparsers.add_parser("join", help="Interactive live view of a shared thread for a human foreman - invites agents on a new thread, reads/sends in one screen")
+    p_join = subparsers.add_parser("join", help="Interactive live view of a shared thread for a human foreman - invites agents on a new thread, reads/sends in one screen", epilog="Presence note: the live view only stays live while this process runs - agents holding active presence must loop their thread call per skills/<harness>/SKILL.md, not rely on a single one-shot call.")
     p_join.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_join.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_join.add_argument("-I", "--invite", action="store_true", help="Always show the invite picker, even rejoining an existing thread")
