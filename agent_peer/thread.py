@@ -122,9 +122,12 @@ def _strip_fenced_code_blocks(content: str) -> str:
             None,
         )
         if close_idx is None:
-            out.append(lines[i])
-            i += 1
-            continue
+            # No valid closer anywhere: per CommonMark, an unclosed fence
+            # extends to end-of-message - everything after the opener,
+            # mentions included, is inside the (malformed) code block.
+            # Deliberately conservative here: a missed mention is
+            # recoverable (resend it plainly), an accidental summon is not.
+            break
         i = close_idx + 1
     return "\n".join(out)
 

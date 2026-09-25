@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.9
+
+- Changed: a code fence opened without a matching close now extends to the end of the
+  message, matching how Markdown itself renders it - any `@mention` or `[stop]` after an
+  unclosed fence is treated as still inside it and does not knock. Previously the opener
+  was treated as literal text, which risked the opposite failure this whole fix chain
+  addressed: an accidental summon from a name that happened to follow a stray, unintended
+  fence marker.
+
 ## 0.8.8
 
 - Fixed: the `[stop]` urgency keyword bypassed the code-span stripping added for `@mention`s

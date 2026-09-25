@@ -38,9 +38,10 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
 
     def test_mismatched_fence_delimiters_do_not_pair(self):
         # A backtick-opened fence must not be closed by a tilde fence (or
-        # vice versa) - the mention after a mismatched "closer" is real text.
+        # vice versa) - since it therefore never validly closes, the
+        # unclosed-fence policy applies (extends to EOF, see below).
         content = f"{BT3}\nnot actually closed here\n{TILDE3} @alice"
-        self.assertEqual(_mention_tokens(content), {"alice"})
+        self.assertEqual(_mention_tokens(content), set())
 
     def test_mention_outside_code_span_still_extracted(self):
         self.assertEqual(_mention_tokens("`quoted @bob` but also plain @alice"), {"alice"})
@@ -53,10 +54,9 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
 
     def test_fence_closer_with_trailing_content_is_not_a_valid_closer(self):
         # A line with fence characters followed by other text isn't a valid
-        # CommonMark closing fence - the block stays open, so this session's
-        # deliberate fallback (unclosed fence = treat as literal text, don't
-        # strip) leaves both mentions visible rather than guessing.
-        self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}` @bob"), {"alice", "bob"})
+        # CommonMark closing fence - the block never validly closes, so the
+        # unclosed-fence policy applies (extends to EOF).
+        self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}` @bob"), set())
 
     def test_odd_backtick_run_inside_single_span_does_not_leak_mention(self):
         # Regression: a stray ``` (three backticks, not meant as a fence)
@@ -95,6 +95,18 @@ class StopKeywordCodeSpanTest(unittest.TestCase):
 
     def test_real_stop_still_triggers(self):
         self.assertTrue(_mentions("[stop] halt now", "someone"))
+
+
+class UnclosedFencePolicyTest(unittest.TestCase):
+    # Deliberate policy (discussed live, decided in favor of this over
+    # treating the opener as literal text): an unclosed fence extends to
+    # end-of-message, matching real Markdown rendering. A missed mention is
+    # recoverable by resending it plainly; an accidental summon is not.
+    def test_unclosed_fence_swallows_mention_after_it(self):
+        self.assertEqual(_mention_tokens(f"{BT3}\n@alice please look"), set())
+
+    def test_mention_before_an_unclosed_fence_still_works(self):
+        self.assertEqual(_mention_tokens(f"@alice see this:\n{BT3}\nsome code"), {"alice"})
 
 
 if __name__ == "__main__":
