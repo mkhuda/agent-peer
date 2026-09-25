@@ -1,13 +1,14 @@
 # Changelog
 
+## 0.8.5
+
+- Fixed: the code-span detection added in 0.8.4 only recognized triple-backtick fences and
+  single-line inline code. Tilde fences (`~~~`), multi-line inline code spans, and longer
+  backtick-run delimiters are now excluded from mention detection too.
+
 ## 0.8.4
 
-- Fixed: a shared thread's mesh-wide `@mention` summons (docs/tasks/0029) could knock a
-  session in a completely different, unrelated project - a name mentioned purely as
-  narrative text ("Claude (@some-other-session)...") was indistinguishable from a real
-  summons, and the target got the full post pushed to it. Mesh-wide `@mention` summons are
-  now scoped to the sender's own workspace by default; a name quoted inside inline or
-  fenced code is also never read as a mention at all, in any thread.
+- Fixed: thread `@mention` summons could notify a session in an unrelated workspace when mentioned in plain text. Summons are now scoped to the sender's own workspace by default; mentions quoted inside inline or fenced code spans are also excluded from summon detection.
 
 ## 0.8.3
 

@@ -94,8 +94,8 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
     return record
 
 
-_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
-_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+_FENCED_CODE_RE = re.compile(r"(```|~~~)[\s\S]*?\1")
+_INLINE_CODE_RE = re.compile(r"(`+)[\s\S]*?\1")
 
 
 def _strip_code_spans(content: str) -> str:
