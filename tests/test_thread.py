@@ -150,7 +150,34 @@ def test_logs_thread_as_viewer_highlights_their_own_messages():
         assert r.returncode == 0, r.stderr
         assert "foreman (you)" in r.stdout
         assert "worker-1 (you)" not in r.stdout
-        assert "═" in r.stdout  # the double divider used only for the viewer's own card
+
+
+def test_logs_thread_groups_consecutive_same_sender_without_repeating_header():
+    """Chat-style grouping (Variant B): consecutive posts from the same
+    sender show the [TYPE] name header only once, not per message."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "first", "--sender", "foreman"], home)
+        run_cli(["send", "--thread", "sync", "second", "--sender", "foreman"], home)
+        run_cli(["send", "--thread", "sync", "from someone else", "--sender", "worker-1"], home)
+        r = run_cli(["logs", "--thread", "sync", "--no-color"], home)
+        assert r.returncode == 0, r.stderr
+        assert r.stdout.count("foreman") == 1
+        assert r.stdout.count("worker-1") == 1
+        assert "first" in r.stdout and "second" in r.stdout
+
+
+def test_logs_thread_labels_known_harness_name_patterns_even_when_unregistered():
+    """_infer_agent_type_from_name must recognize every harness prefix
+    (codex/muse/pi-or-omp/opencode), not just agy - a session that has
+    since left (so it's no longer in the live registry cache) still gets
+    the right label instead of silently defaulting to Claude."""
+    with isolated_home() as home:
+        run_cli(["send", "--thread", "sync", "backend update", "--sender", "codex-1234"], home)
+        run_cli(["send", "--thread", "sync", "caption fix", "--sender", "muse-5678"], home)
+        r = run_cli(["logs", "--thread", "sync", "--no-color"], home)
+        assert r.returncode == 0, r.stderr
+        assert "[CODEX] codex-1234" in r.stdout
+        assert "[MUSE] muse-5678" in r.stdout
 
 
 def test_concurrent_thread_appends_get_unique_sequential_seq():

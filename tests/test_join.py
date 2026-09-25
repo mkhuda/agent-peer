@@ -281,7 +281,7 @@ stop = threading.Event()
 box = [0]
 with mock.patch.object(j, "read_thread", side_effect=fake_read):
     th = threading.Thread(
-        target=j._poll_loop, args=("tfix3", "me", box, stop, False, None), daemon=True
+        target=j._poll_loop, args=("tfix3", "me", box, stop, False, None, {{}}, [None]), daemon=True
     )
     th.start()
     time.sleep(1.6)

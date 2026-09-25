@@ -1,6 +1,19 @@
 # Changelog
 
-## 0.8.9
+## 0.9.0
+
+- **Redesigned shared-thread view** (`agent-peer join`/`thread`/`logs --thread`): each
+  sender now gets a filled, per-harness-colored badge (`CLAUDE`/`CODEX`/`AGY`/`MUSE`/`PI`/
+  `OPENCODE`, plus a distinct `YOU` badge for your own posts) instead of a plain divider
+  bar. Consecutive posts from the same sender group together - the badge/name header only
+  repeats when the sender actually changes, chat-app style, instead of once per message.
+  Harness-type detection also now recognizes every known harness by name pattern (not
+  just Antigravity), so a session no longer in the live registry still gets the right
+  color instead of silently defaulting to Claude.
+- Fixed: the interactive `join` input line ignored Left/Right arrow keys entirely (typing
+  after pressing Left always landed at the end of the line, not where the cursor visually
+  was). Left/Right now move the cursor character-by-character; Option/Alt+Left/Right or
+  Ctrl+Left/Right jump by word, matching standard terminal editing conventions.
 
 - Changed: a code fence opened without a matching close now extends to the end of the
   message, matching how Markdown itself renders it - any `@mention` or `[stop]` after an

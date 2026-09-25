@@ -117,6 +117,19 @@ def test_visual_rows_counts_soft_wrap_not_just_explicit_newlines(monkeypatch):
     assert e._visual_rows() == 1 + 2  # "... " (4) + 100 = 104 -> ceil(104/80) = 2
 
 
+def test_reset_clears_cursor_position_not_just_the_text():
+    """A stale cursor_col from a previous (longer) message must not leave a
+    shorter next one inserting/deleting out of bounds."""
+    e = LineEditor("> ")
+    e.append_char("hello world")
+    e.move_left()
+    e.move_left()
+    assert e.cursor_col == len("hello world") - 2
+    e.reset()
+    assert e.cursor_col == 0
+    assert e.lines == [""]
+
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="pty is POSIX-only; rawline's Windows path uses msvcrt instead")
 
 
@@ -135,10 +148,51 @@ def test_esc_clears_the_in_progress_line():
 def test_arrow_keys_are_ignored_not_a_clear():
     """Real bug, caught live: pressing Up/Left/Down/Right mid-composition
     used to fall through to editor.reset() and wipe everything typed.
-    Unrecognized escape sequences must be swallowed, keeping the buffer
-    intact."""
-    arrows = [b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D"]
+    Left/Right now move the cursor (see the tests below) rather than being
+    fully ignored, but moving the cursor and landing back at the end before
+    Enter must still never touch the text itself. Up/Down remain
+    unrecognized/swallowed - there's no history to navigate here."""
+    arrows = [b"\x1b[A", b"\x1b[B", b"\x1b[C", b"\x1b[D", b"\x1b[C"]
     assert "RESULT:'keep me'" in _run_pty([b"keep me"] + arrows + [b"\r"])
+
+
+def test_left_arrow_then_typing_inserts_mid_line_not_at_the_end():
+    """The actual fix: Left/Right used to be pure no-ops (see the arrow test
+    above, pre-fix), so typing after pressing Left always landed at the end
+    of the line instead of where the cursor visually was."""
+    assert "RESULT:'helXXlo'" in _run_pty([b"hello", b"\x1b[D\x1b[D", b"XX", b"\r"])
+
+
+def test_right_arrow_moves_forward_after_moving_left():
+    assert "RESULT:'heZllo'" in _run_pty(
+        [b"hello", b"\x1b[D" * 5, b"\x1b[C" * 2, b"Z", b"\r"]
+    )
+
+
+def test_backspace_respects_cursor_position_not_always_the_end():
+    """Same class of bug as insert: backspace always removed the LAST
+    character of the line regardless of where the cursor was."""
+    assert "RESULT:'helo'" in _run_pty([b"hello", b"\x1b[D\x1b[D", b"\x7f", b"\r"])
+
+
+def test_word_left_csi_modifier_jumps_to_previous_word_start():
+    """Ctrl+Left/Option+Left send a modified CSI sequence (e.g. \\x1b[1;3D
+    for Alt, \\x1b[1;5D for Ctrl) rather than a plain \\x1b[D."""
+    assert "RESULT:'hello Xworld'" in _run_pty([b"hello world", b"\x1b[1;3D", b"X", b"\r"])
+
+
+def test_word_left_meta_b_jumps_to_previous_word_start():
+    """The classic readline meta convention (Alt+b) some terminals send
+    instead of a CSI-modified arrow."""
+    assert "RESULT:'hello Xworld'" in _run_pty([b"hello world", b"\x1bb", b"X", b"\r"])
+
+
+def test_word_right_jumps_to_next_word_end():
+    assert "RESULT:'hello worldX'" in _run_pty(
+        [b"hello world", b"\x1b[D" * 5, b"\x1bf", b"X", b"\r"]
+    )
+
+
 
 
 def test_trailing_backslash_continues_composing_a_second_line():

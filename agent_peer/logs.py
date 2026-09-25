@@ -40,11 +40,54 @@ BG_RED = "\033[41m"
 BG_YELLOW = "\033[43m"
 BG_CYAN = "\033[46m"
 
+# Per-harness accent, one color per agent type so a busy thread reads at a
+# glance who's who without parsing the name - 256-color, only used when
+# supports_color() is true (plain-text fallback never touches these).
+_BLACK_TEXT = "\033[38;5;232m"
+HARNESS_FG = {
+    "CLAUDE": "\033[38;5;208m", "CODEX": "\033[38;5;39m",
+    "AGY": "\033[38;5;141m", "MUSE": "\033[38;5;47m",
+    "PI": "\033[38;5;214m", "OPENCODE": "\033[38;5;80m",
+}
+HARNESS_BG = {
+    "CLAUDE": "\033[48;5;208m", "CODEX": "\033[48;5;39m",
+    "AGY": "\033[48;5;141m", "MUSE": "\033[48;5;47m",
+    "PI": "\033[48;5;214m", "OPENCODE": "\033[48;5;80m",
+}
+HARNESS_BADGE_TEXT = {
+    "CLAUDE": _BLACK_TEXT, "CODEX": BRIGHT_WHITE, "AGY": _BLACK_TEXT,
+    "MUSE": _BLACK_TEXT, "PI": _BLACK_TEXT, "OPENCODE": _BLACK_TEXT,
+}
+YOU_BG = "\033[48;5;255m"
+YOU_FG = "\033[38;5;255m"
+
 def supports_color() -> bool:
     """Check if output stream supports color formatting."""
     if os.environ.get("NO_COLOR") or os.environ.get("TERM") == "dumb":
         return False
     return sys.stdout.isatty()
+
+_NAME_PATTERN_TO_TYPE = (
+    ("antigravity", "AGY"), ("agy", "AGY"),
+    ("codex", "CODEX"),
+    ("muse", "MUSE"),
+    ("opencode", "OPENCODE"),
+    ("omp", "PI"), ("pi", "PI"),
+)
+
+
+def _infer_agent_type_from_name(name: str) -> str:
+    """Best-effort fallback when a session's own registration has no
+    explicit agentType - matches every harness_detect.py-known name prefix
+    (agy/codex/muse/pi-or-omp/opencode), not just agy, so a session missing
+    from the registry cache still gets a correctly-colored badge instead of
+    silently defaulting to Claude."""
+    clean = name.lower()
+    for pattern, agent_type in _NAME_PATTERN_TO_TYPE:
+        if pattern in clean:
+            return agent_type
+    return "Claude"
+
 
 def get_session_cache() -> Dict[str, Dict[str, str]]:
     """Map PID and lower session name to {name, type, pid} info."""
@@ -54,7 +97,7 @@ def get_session_cache() -> Dict[str, Dict[str, str]]:
         for s in sessions:
             pid = s.get("pid")
             name = s.get("name") or f"pid-{pid}"
-            agent_type = s.get("agentType") or ("AGY" if "antigravity" in name.lower() or "agy" in name.lower() else "Claude")
+            agent_type = s.get("agentType") or _infer_agent_type_from_name(name)
             info = {
                 "name": name,
                 "type": agent_type,
@@ -68,17 +111,18 @@ def get_session_cache() -> Dict[str, Dict[str, str]]:
     return cache
 
 def resolve_agent_type(name: str, cache: Dict[str, Dict[str, str]]) -> str:
-    """Infer whether session is AGY or Claude."""
+    """Infer a session's harness type: cache lookup first (exact name, then
+    a bare pid embedded in the name), then a name-pattern fallback covering
+    every known harness (not just AGY) for a session no longer in the live
+    registry cache (e.g. it already left)."""
     clean = name.lower().strip()
     if clean in cache:
         return cache[clean].get("type", "Claude")
     m = re.search(r'(\d+)', clean)
     if m and m.group(1) in cache:
         return cache[m.group(1)].get("type", "Claude")
-    if "antigravity" in clean or "agy" in clean:
-        return "AGY"
     if clean and clean not in ("peer", "unknown", "all"):
-        return "Claude"
+        return _infer_agent_type_from_name(clean)
     return ""
 
 def format_agent_badge(agent_type: str, use_color: bool = True) -> str:
@@ -92,6 +136,17 @@ def format_agent_badge(agent_type: str, use_color: bool = True) -> str:
             return f"{BRIGHT_YELLOW}[Claude]{RESET}"
         return f"{DIM}[{agent_type}]{RESET}"
     return f"[{agent_type}]"
+
+def format_harness_fill_badge(agent_type: str, use_color: bool = True, is_you: bool = False) -> str:
+    """Filled background-color badge per harness (e.g. a solid-orange
+    ' CLAUDE ' pill) - used in the thread view, distinct from
+    format_agent_badge's subtler bracketed text used in the 1:1 log view."""
+    label = "YOU" if is_you else (agent_type or "?").upper()
+    if not use_color:
+        return f"[{label}]"
+    bg = YOU_BG if is_you else HARNESS_BG.get(label, DIM)
+    fg = _BLACK_TEXT if is_you else HARNESS_BADGE_TEXT.get(label, BRIGHT_WHITE)
+    return f"{bg}{fg}{BOLD} {label} {RESET}"
 
 def extract_sender_info(record: dict, session_cache: Dict[str, Dict[str, str]]) -> Tuple[str, str, str]:
     """
@@ -395,13 +450,23 @@ def _thread_urgency_tag(content: str, use_color: bool) -> str:
         return f"{BRIGHT_YELLOW}{BOLD}[CHANGE]{RESET}"
     return f"{BRIGHT_CYAN}[FYI]{RESET}"
 
-def format_thread_entry(record: dict, use_color: bool = True, viewer: Optional[str] = None) -> str:
+def format_thread_entry(
+    record: dict,
+    use_color: bool = True,
+    viewer: Optional[str] = None,
+    session_cache: Optional[Dict[str, Dict[str, str]]] = None,
+    last_sender: Optional[str] = None,
+) -> str:
     """A thread record has no recipient/priority (it's shared, not
     one-to-one) - a simpler card than format_log_entry's inbox cards.
-    `viewer` (the reader's own participant name) gets a visually distinct
-    card - a double divider and a different accent color - so a busy
-    thread stays easy to scan for "did I already say that" at a glance.
-    System lifecycle events (0031) render as a dimmed ambient line."""
+    Grouped chat style: a filled, per-harness-colored badge (or a white
+    "YOU" badge for the viewer's own posts) plus name/time header, but only
+    when `sender` differs from `last_sender` (the previous entry rendered in
+    the same view) - consecutive posts from the same sender skip straight
+    to the indented body, same convention as Slack/Discord so a busy
+    exchange doesn't repeat the same header every line. Callers own tracking
+    `last_sender` across calls (see join.py/show_thread_logs). System
+    lifecycle events (0031) render as a dimmed ambient line, ungrouped."""
     if record.get("from") == "system" or record.get("type") == "event":
         line = f"— {record.get('content', '')} —"
         return f"{DIM}{line}{RESET}\n" if use_color else f"{line}\n"
@@ -409,27 +474,28 @@ def format_thread_entry(record: dict, use_color: bool = True, viewer: Optional[s
     time_str = time.strftime("%H:%M:%S", time.localtime(record.get("ts", 0)))
     sender = record.get("from", "unknown")
     content = record.get("content", "")
-    term_width = shutil.get_terminal_size((88, 24)).columns
-    divider_len = min(term_width, 100)
     urgency_tag = _thread_urgency_tag(content, use_color)
     is_viewer = viewer is not None and sender == viewer
+    body = "\n".join(f"  {line}" for line in content.splitlines())
 
-    if use_color:
-        accent = BRIGHT_GREEN if is_viewer else BRIGHT_CYAN
-        div_char = "═" if is_viewer else "━"
-        div_bar = f"{DIM}{div_char * divider_len}{RESET}"
-        you_badge = f" {DIM}(you){RESET}" if is_viewer else ""
-        header = f" {BOLD}#{seq}{RESET} {DIM}{time_str}{RESET}  {BOLD}{accent}{sender}{RESET}{you_badge}"
-    else:
-        div_char = "═" if is_viewer else "━"
-        div_bar = div_char * divider_len
+    if sender == last_sender:
+        # Grouped continuation: no header repeat, just the body + seq.
+        return f"{body}  {DIM}#{seq}{RESET}\n" if use_color else f"{body}  #{seq}\n"
+
+    if not use_color:
         you_badge = " (you)" if is_viewer else ""
-        header = f" #{seq} {time_str}  {sender}{you_badge}"
+        header = f"[{resolve_agent_type(sender, session_cache or {})}] {sender}{you_badge}  {time_str}"
+        if urgency_tag:
+            header += f"  {urgency_tag}"
+        return f"\n{header}\n{body}  #{seq}\n"
+
+    agent_type = resolve_agent_type(sender, session_cache or {})
+    fg = YOU_FG if is_viewer else HARNESS_FG.get((agent_type or "").upper(), BRIGHT_CYAN)
+    badge = format_harness_fill_badge(agent_type, use_color=True, is_you=is_viewer)
+    header = f"{badge} {BOLD}{fg}{sender}{RESET} {DIM}· {time_str}{RESET}"
     if urgency_tag:
         header += f"  {urgency_tag}"
-
-    body = "\n".join(f"  {line}" for line in content.splitlines())
-    return f"{div_bar}\n{header}\n{body}\n"
+    return f"\n{header}\n{body}  {DIM}#{seq}{RESET}\n"
 
 def show_thread_logs(
     thread_id: str,
@@ -444,6 +510,18 @@ def show_thread_logs(
     meeting happen without needing to 'thread <id>' (wait) on it. `viewer`
     highlights that participant's own messages (see format_thread_entry)."""
     use_color = not no_color and supports_color()
+    session_cache = get_session_cache()
+    last_sender = [None]
+
+    def _render(r):
+        text = format_thread_entry(
+            r, use_color=use_color, viewer=viewer,
+            session_cache=session_cache, last_sender=last_sender[0],
+        )
+        if r.get("from") != "system" and r.get("type") != "event":
+            last_sender[0] = r.get("from")
+        return text
+
     all_records = read_thread(thread_id)
     records = all_records
     if query:
@@ -463,7 +541,7 @@ def show_thread_logs(
         print(f"{DIM}{status}{RESET}\n" if use_color else f"{status}\n")
 
     for r in records_to_show:
-        print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color, viewer=viewer))
+        print(json.dumps(r) if raw else _render(r))
     sys.stdout.flush()
 
     if not follow:
@@ -481,7 +559,7 @@ def show_thread_logs(
                 last_seq = seq
                 if query and query.lower() not in r.get("content", "").lower():
                     continue
-                print(json.dumps(r) if raw else format_thread_entry(r, use_color=use_color, viewer=viewer))
+                print(json.dumps(r) if raw else _render(r))
                 sys.stdout.flush()
             time.sleep(0.5)
     except KeyboardInterrupt:

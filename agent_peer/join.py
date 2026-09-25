@@ -10,7 +10,7 @@ from .protocol import get_thread_path
 from .registry import get_active_sessions
 from .sender import send_message
 from .thread import read_thread, append_thread_message, touch_thread_presence, leave_thread_presence, read_thread_presence
-from .logs import format_thread_entry, format_thread_presence_header, supports_color
+from .logs import format_thread_entry, format_thread_presence_header, supports_color, get_session_cache
 from .picker import pick_multi
 from .rawline import LineEditor, read_message
 
@@ -122,7 +122,21 @@ def _print_live(text: str, editor):
     sys.stdout.flush()
 
 
-def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor, paused=None):
+def _next_entry(r, use_color, viewer, session_cache, last_sender_box):
+    """Renders one record and advances the shared last_sender_box - a tiny
+    wrapper so the three separate print sites in run_join (backlog, live
+    poll, and your own sent message) all group consecutive same-sender
+    entries against ONE shared history instead of three isolated ones."""
+    text = format_thread_entry(
+        r, use_color=use_color, viewer=viewer,
+        session_cache=session_cache, last_sender=last_sender_box[0],
+    )
+    if r.get("from") != "system" and r.get("type") != "event":
+        last_sender_box[0] = r.get("from")
+    return text
+
+
+def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor, session_cache, last_sender_box, paused=None):
     while not stop_event.is_set():
         try:
             if paused is not None and paused.is_set():
@@ -136,7 +150,7 @@ def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, edit
                 last_seq_box[0] = seq
                 if r.get("from") == participant:
                     continue  # already visible from your own typed line
-                _print_live(format_thread_entry(r, use_color=use_color, viewer=participant), editor)
+                _print_live(_next_entry(r, use_color, participant, session_cache, last_sender_box), editor)
             touch_thread_presence(thread_id, participant, left=False)
         except Exception as e:
             print(f"agent-peer: poll tick skipped ({e})", file=sys.stderr)
@@ -158,6 +172,9 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
         if invited:
             print(f"Invited: {', '.join(invited)}")
 
+    session_cache = get_session_cache()
+    last_sender_box = [None]
+
     backlog = read_thread(thread_id)
     print(f"\n=== THREAD '{thread_id}' ===")
     header = format_thread_presence_header(thread_id, use_color)
@@ -168,7 +185,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
         # unlike _poll_loop, backlog is full history - self-echo suppression
         # there only hides what your own live typing already echoed locally,
         # a rejoin has no such echo and must show everything
-        print(format_thread_entry(r, use_color=use_color, viewer=participant))
+        print(_next_entry(r, use_color, participant, session_cache, last_sender_box))
 
     # A real tty gets the raw/cbreak multi-line editor (Esc clears the whole
     # composition, Shift+Enter/Alt+Enter/trailing "\" all continue composing
@@ -184,7 +201,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     touch_thread_presence(thread_id, participant, left=False)
     poller = threading.Thread(
         target=_poll_loop,
-        args=(thread_id, participant, last_seq_box, stop_event, use_color, editor, invite_paused),
+        args=(thread_id, participant, last_seq_box, stop_event, use_color, editor, session_cache, last_sender_box, invite_paused),
         daemon=True,
     )
     poller.start()
@@ -219,7 +236,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
             last_seq_box[0] = max(last_seq_box[0], record["seq"])
             if editor is not None:
                 editor.clear_rendered_area()
-            print(format_thread_entry(record, use_color=use_color, viewer=participant))
+            print(_next_entry(record, use_color, participant, session_cache, last_sender_box))
     finally:
         stop_event.set()
         poller.join(timeout=2)
