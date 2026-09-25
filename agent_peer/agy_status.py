@@ -86,7 +86,10 @@ def get_agy_status_dict() -> dict:
         )
 
     # Freshen just the 5h numbers live; weekly + context have no API source.
-    live, live_error = agy_live.fetch_live_5h_quota()
+    # Pass the cached snapshot's own model name so the live fetch can match
+    # the right model instead of guessing across whatever Google returns.
+    active_model = (payload.get("model") or {}).get("display_name")
+    live, live_error = agy_live.fetch_live_5h_quota(active_model)
     if live:
         for key in ("gemini_5h", "claude_gpt_5h"):
             if live.get(key):

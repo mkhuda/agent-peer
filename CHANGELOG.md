@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.8.2
+
+- Fixed: `agent-peer status`'s live 5h quota reading for `agy` (Antigravity) could report a
+  misleadingly high number when Google's `fetchAvailableModels` endpoint didn't track the
+  currently active model's quota at all - an unrelated, untouched sibling model still sitting
+  at 100% was being picked up by a blind "most-constrained-of-everything" heuristic instead.
+  The live fetch now matches the model actually in use (from the cached statusline snapshot)
+  and, when that exact model has no quota data of its own, reports it as unavailable rather
+  than substituting a different model's number.
+
 ## 0.8.1
 
 - **Global mesh policy injection in `agent-peer setup`**: `--rules` injects a compact,
