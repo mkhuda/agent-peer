@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.3
+
+- Fixed two follow-up gaps in 0.8.2's agy quota-matching fix, found in review: the token
+  matcher used substring containment, so hint tokens like "3"/"8" falsely matched an
+  unrelated "13.8" model; matching is now done on whole tokens instead. Also, a hint that
+  matched no model in the response at all no longer silently falls back to an unrelated
+  model's number - it's reported as unavailable, same as when the active model matches but
+  carries no quota data of its own.
+
 ## 0.8.2
 
 - Fixed: `agent-peer status`'s live 5h quota reading for `agy` (Antigravity) could report a

@@ -58,10 +58,26 @@ class PickFiveHourQuotaTest(unittest.TestCase):
         result = _pick_5h_quota(data, None)
         self.assertEqual(result["gemini_5h"]["remaining_pct"], 27.1)
 
-    def test_hint_not_present_in_response_falls_back(self):
+    def test_hint_given_but_matches_nothing_reports_unavailable_not_a_guess(self):
+        # A hint was given (caller cares which model is active) but nothing
+        # in the response matches it at all - e.g. a rename. Guessing with an
+        # unrelated model's number would repeat the same masking mistake.
         data = {"models": {"gemini-2.5-pro": _model(GEMINI, remaining_fraction=0.6)}}
         result = _pick_5h_quota(data, "Gemini 3.8 Flash (Medium)")
-        self.assertEqual(result["gemini_5h"]["remaining_pct"], 60.0)
+        self.assertIsNone(result["gemini_5h"])
+
+    def test_token_boundary_not_substring_38_does_not_match_138(self):
+        # 'gemini-13.8-flash' must not match hint tokens ['3','8','flash']
+        # just because '3' and '8' are substrings of '13' - regression for
+        # a false-positive codex-7284 found in review.
+        data = {
+            "models": {
+                "gemini-13.8-flash": _model(GEMINI, remaining_fraction=1.0),
+                "gemini-3.8-flash-tiered": _model(GEMINI, remaining_fraction=0.271),
+            }
+        }
+        result = _pick_5h_quota(data, "Gemini 3.8 Flash (Medium)")
+        self.assertEqual(result["gemini_5h"]["remaining_pct"], 27.1)
 
     def test_third_party_bucket_unaffected_by_gemini_hint(self):
         data = {

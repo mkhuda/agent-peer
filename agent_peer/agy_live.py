@@ -68,10 +68,13 @@ def _tokenize_model_hint(display_name: str | None) -> list[str]:
 
 
 def _matches_active_model(model_key: str, tokens: list[str]) -> bool:
+    """Token-boundary match, not substring - 'gemini-13.8-flash' must not
+    match hint tokens ['3', '8', 'flash'] just because '3' and '8' happen to
+    appear inside '13'."""
     if not tokens:
         return False
-    key = model_key.lower()
-    return all(t in key for t in tokens)
+    key_tokens = set(re.findall(r"[a-zA-Z0-9]+", model_key.lower()))
+    return all(t in key_tokens for t in tokens)
 
 
 def _pick_5h_quota(data: dict, active_model_hint: str | None) -> dict:
@@ -120,6 +123,14 @@ def _pick_5h_quota(data: dict, active_model_hint: str | None) -> dict:
         if is_active and bucket_key not in matched:
             matched[bucket_key] = entry
 
+    # active_model_hint always names the caller's actual driver model, and
+    # today that's always Gemini (agy_status.py's only caller) - so a
+    # non-empty hint that matched nothing anywhere in the response is treated
+    # as "we don't know which model is active" specifically for gemini_5h,
+    # not for claude_gpt_5h (a hint never describes a third-party model here,
+    # so its min()-of-unused-siblings fallback carries no masking risk).
+    hint_given_but_matched_nothing = bool(tokens) and not matched and not any(active_present_without_quota.values())
+
     result = {}
     for key, entries in buckets.items():
         if key in matched:
@@ -128,6 +139,11 @@ def _pick_5h_quota(data: dict, active_model_hint: str | None) -> dict:
             # The active model showed up but Google isn't tracking its quota
             # here - an unrelated sibling model's number would be a guess
             # dressed up as a live reading. Say so instead of overriding.
+            result[key] = None
+        elif key == "gemini_5h" and hint_given_but_matched_nothing:
+            # A hint was given but didn't match any model at all (rename,
+            # unrecognized format, etc.) - same reasoning as above, don't
+            # guess with an unrelated model's number.
             result[key] = None
         else:
             result[key] = min(entries, key=lambda e: e["remaining_pct"]) if entries else None
