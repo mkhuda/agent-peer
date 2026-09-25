@@ -95,7 +95,33 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
 
 
 _FENCED_CODE_RE = re.compile(r"(```|~~~)[\s\S]*?\1")
-_INLINE_CODE_RE = re.compile(r"(`+)[\s\S]*?\1")
+_BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def _strip_inline_code_spans(content: str) -> str:
+    """CommonMark inline code span rule: an opening run of N backticks is
+    closed by the NEXT run of exactly N backticks (not more, not fewer) -
+    unlike fenced blocks, a regex backreference can't express this alone,
+    because a shorter/longer run elsewhere would wrongly pair with it (a
+    literal ``` typed inside a single-backtick span, for example)."""
+    runs = list(_BACKTICK_RUN_RE.finditer(content))
+    out = []
+    pos = 0
+    i = 0
+    while i < len(runs):
+        opener = runs[i]
+        close_idx = next(
+            (j for j in range(i + 1, len(runs)) if len(runs[j].group()) == len(opener.group())),
+            None,
+        )
+        if close_idx is None:
+            i += 1
+            continue
+        out.append(content[pos:opener.start()])
+        pos = runs[close_idx].end()
+        i = close_idx + 1
+    out.append(content[pos:])
+    return " ".join(out)
 
 
 def _strip_code_spans(content: str) -> str:
@@ -103,7 +129,7 @@ def _strip_code_spans(content: str) -> str:
     quoted as a literal code example ("the socket at `/tmp/.../@name.sock`")
     must not be read as an @mention."""
     content = _FENCED_CODE_RE.sub(" ", content)
-    return _INLINE_CODE_RE.sub(" ", content)
+    return _strip_inline_code_spans(content)
 
 
 def _mention_tokens(content: str):

@@ -46,13 +46,25 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
         self.assertEqual(_mention_tokens("`quoted @bob` but also plain @alice"), {"alice"})
 
     def test_closer_run_longer_than_opener_still_closes(self):
-        # Valid CommonMark: a closing fence run may be longer than the
-        # opener's (same character). The backreference only needs to find
-        # its N-length run as a substring, which a longer run of the same
-        # character always contains, so this closes correctly without
-        # requiring exact-length matching.
+        # Valid CommonMark for FENCED blocks: a closing fence run may be
+        # longer than the opener's (same character). The backreference only
+        # needs to find its N-length run as a substring, which a longer run
+        # of the same character always contains.
         self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}`"), set())
         self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}` @bob"), {"bob"})
+
+    def test_odd_backtick_run_inside_single_span_does_not_leak_mention(self):
+        # Regression: a stray ``` (three backticks, not meant as a fence)
+        # typed inside what the author meant as a single-backtick span used
+        # to confuse a naive regex into pairing the wrong backticks,
+        # leaving the mention after it unstripped.
+        self.assertEqual(_mention_tokens("x `before ``` @alice `"), set())
+
+    def test_inline_span_requires_exact_length_match_not_just_shorter(self):
+        # CommonMark inline spans (unlike fences) require the closer to be
+        # exactly the same run length as the opener - a run of a different
+        # length is just literal backticks, not a delimiter pair.
+        self.assertEqual(_mention_tokens("`a````b` @alice"), {"alice"})
 
 
 if __name__ == "__main__":

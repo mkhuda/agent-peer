@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.6
+
+- Fixed: inline code-span stripping (0.8.4/0.8.5) used a regex that could mispair backtick
+  runs of different lengths inside a single span, leaving a mention after a stray backtick
+  run unstripped. Inline code spans are now matched by finding the next run of exactly the
+  same backtick count, per the same rule Markdown itself uses, instead of a regex
+  approximation.
+
 ## 0.8.5
 
 - Fixed: the code-span detection added in 0.8.4 only recognized triple-backtick fences and
