@@ -222,9 +222,11 @@ class SetupCliTest(unittest.TestCase):
         from agent_peer import cli
         from unittest.mock import patch
         import argparse
+        import io
 
+        fake_out = io.StringIO()
         with patch.object(setup_tui, "pick_harnesses", return_value=(None, False)):
-            with patch("sys.stdout") as mock_stdout:
+            with patch("sys.stdout", fake_out):
                 parser = argparse.ArgumentParser()
                 parser.add_argument("--all", action="store_true")
                 parser.add_argument("--harness", action="append", default=[])
@@ -235,9 +237,12 @@ class SetupCliTest(unittest.TestCase):
                 args = parser.parse_args([])
                 with patch("os.environ", dict(os.environ, HOME=self.home)):
                     cli.cmd_setup(args)
-        # Verify no files installed
+
+        self.assertIn("setup cancelled - no changes made", fake_out.getvalue())
+        # Verify no skill or rules files installed
         for hid in ("agy", "codex", "muse", "pi", "opencode", "claude"):
             self.assertFalse(os.path.isfile(harness_detect.target_path(hid, self.home)))
+            self.assertFalse(os.path.isfile(harness_detect.rules_target_path(hid, self.home)))
 
     def test_pick_harnesses_keyboard_interrupt_returns_none_false(self):
         from unittest.mock import patch
