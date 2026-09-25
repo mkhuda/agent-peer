@@ -81,6 +81,14 @@ installs each one's `SKILL.md` at its known path. Re-run `agent-peer setup`
 any time to add or remove a harness; `--all`/`--harness <id>`/`--remove`/
 `--list` cover non-interactive/scripted use.
 
+Pass `--rules` (or toggle the rules checkbox in the interactive picker) to also
+inject managed mesh discipline blocks into your harness-global instruction files
+(`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`,
+`~/.agents/AGENTS.md`, `~/.pi/agent/AGENTS.md`, `~/.config/opencode/AGENTS.md`).
+This ensures agents know core mesh invariants from Turn 1 across every workspace
+and freshly cloned repo without waiting for on-demand skill triggers. Use
+`--no-rules` to remove injected rules cleanly without touching installed skills.
+
 **Prefer to install the CLI yourself?**
 ```bash
 uv tool install agent-peer

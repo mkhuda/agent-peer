@@ -17,31 +17,37 @@ HARNESSES = (
         "id": "agy",
         "label": "agy (Antigravity)",
         "target": os.path.join(".gemini", "config", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".gemini", "GEMINI.md"),
     },
     {
         "id": "codex",
         "label": "Codex CLI",
         "target": os.path.join(".codex", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".codex", "AGENTS.md"),
     },
     {
         "id": "muse",
         "label": "muse",
         "target": os.path.join(".agents", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".agents", "AGENTS.md"),
     },
     {
         "id": "pi",
         "label": "pi / oh-my-pi (omp)",
         "target": os.path.join(".pi", "agent", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".pi", "agent", "AGENTS.md"),
     },
     {
         "id": "opencode",
         "label": "opencode",
         "target": os.path.join(".config", "opencode", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".config", "opencode", "AGENTS.md"),
     },
     {
         "id": "claude",
         "label": "Claude Code",
         "target": os.path.join(".claude", "skills", "agent-peer", "SKILL.md"),
+        "rules_target": os.path.join(".claude", "CLAUDE.md"),
     },
 )
 
@@ -136,16 +142,28 @@ def target_path(harness_id, home=None):
     raise KeyError(f"unknown harness: {harness_id!r}")
 
 
+def rules_target_path(harness_id, home=None):
+    """Where the harness's global rule file should be updated under `home`."""
+    for harness in HARNESSES:
+        if harness["id"] == harness_id:
+            return os.path.join(_home_dir(home), harness["rules_target"])
+    raise KeyError(f"unknown harness: {harness_id!r}")
+
+
 def detect_all(home=None):
     """Detect every supported harness. Returns a list of dicts with keys
-    id, label, target, installed, evidence, skill_present, source."""
+    id, label, target, installed, evidence, skill_present, source,
+    rules_target, rules_present."""
     home = _home_dir(home)
     entries = []
     for harness in HARNESSES:
         hid = harness["id"]
         installed, evidence = _DETECTORS[hid](home)
         target = os.path.join(home, harness["target"])
+        rules_target = os.path.join(home, harness["rules_target"])
         source = skill_source_path(hid)
+        from agent_peer.setup_rules import has_marker_block
+
         entries.append(
             {
                 "id": hid,
@@ -155,6 +173,8 @@ def detect_all(home=None):
                 "evidence": evidence or "not detected",
                 "skill_present": os.path.isfile(target),
                 "source": source,
+                "rules_target": rules_target,
+                "rules_present": has_marker_block(rules_target),
             }
         )
     return entries

@@ -9,7 +9,29 @@ description: Use when collaborating with other agent sessions (Claude Code, Anti
 
 Codex is one of two harnesses here with **native inbound delivery** (the
 other is Claude Code) — `listen` once and incoming messages arrive via
-`codex queue` on their own. **You never need `wait`.**
+`codex queue` on their own. **You never need `wait` for direct messages.**
+
+<CRITICAL_INVARIANT>
+CODEX RUNTIME IDIOM:
+Every `thread` call is one-shot (exits on next message). Do not rely on persistent in-turn loops.
+- Standard Idiom: Bounded Peek & Post (`--timeout 10`) -> Reply via `agent-peer send --thread <id> "..."`.
+- Continuous Listening Mode: Opt into Task 0035 follow-all (`--timeout 10 --follow`). Messages knock your native queue automatically without @mentions.
+- Leaving / Unfollowing: Call `agent-peer thread <id> --leave` when departing or disabling follow-all.
+- Anti-Deaf Trap: NEVER end a turn with active presence (`left: false`) and no process blocking. Stay gated (`left: true`).
+</CRITICAL_INVARIANT>
+
+## Exit Gate: Turn-End Checkpoint
+Before finalizing any response, verify:
+1. Are you leaving a thread? Ensure you did not leave active presence (`left: false`) without a running process.
+2. If participating in discussion: use bounded peek (`--timeout 10`) or follow-all (`--timeout 10 --follow`).
+3. If stepping out: call `agent-peer thread <id> --leave` so peers do not wait for you.
+
+### Anti-Rationalization & Red Flags
+| Agent Rationalization | Concrete Reality |
+|---|---|
+| *"I can just leave the thread open without a waiter."* | **WRONG.** If left: false remains on disk with no process, peers see you as active and won't doorbell/knock you. |
+| *"I need to run --leave every turn in follow-all mode."* | **NO.** In follow-all mode, you remain gated (`left: true`, `follow_all: true`). Calling `--leave` clears your follow-all opt-in entirely! |
+| *"Wait is needed for all incoming messages."* | `listen` already delivers direct messages to your native queue (`codex queue`). In threads, use `--follow` or bounded peeks. |
 
 ## Commands
 
@@ -50,15 +72,9 @@ confirmed live, no `wait` involved.
 sessions, so start it detached and keep working - no need to wrap it with
 `&` yourself.
 
-## Don't use `agent-peer wait` here
+## Direct messages do not need `agent-peer wait` here
 
-It works (confirmed live), but Codex's own runtime doesn't allow a truly
-unbounded blocking call - a long `wait` gets cut into repeated turns every
-~60s, and each cut costs you a turn even though nothing happened. That's
-real cost for zero benefit when `listen` already gets you native delivery
-for free. Only reach for `wait` as a one-shot check (call it, let it return
-quickly or time out, don't leave it standing open) - never as your standby
-loop.
+`listen` already delivers direct peer messages straight to your native queue (`codex queue`). Reach for `wait` only as a one-shot check if needed, never as a persistent loop.
 
 ## Shared threads (multi-party discussion)
 

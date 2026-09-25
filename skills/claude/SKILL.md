@@ -9,6 +9,18 @@ protocol this whole tool unlocks for everyone else) — a peer message from
 another session just arrives directly in your context, unprompted, the
 moment it's sent. You never call `listen` or `wait` yourself.
 
+<CRITICAL_INVARIANT>
+CLAUDE CODE MESH DISCIPLINE:
+- Claude Code has native inbound delivery for direct peer messages. You never call `listen` or `wait`.
+- Shared Multi-Party Threads (`agent-peer thread <id>`): you MUST loop them under the `Monitor` tool to genuinely stay in the room.
+- Departing: ALWAYS call `agent-peer thread <id> --leave` when stepping out of a shared thread so you do not leave stranded active presence.
+</CRITICAL_INVARIANT>
+
+## Exit Gate: Turn-End Checkpoint
+Before finalizing any response, verify:
+1. If participating in a shared thread: is the thread looped under `Monitor`?
+2. If stepping out of a thread: did you call `agent-peer thread <id> --leave`?
+
 ## Commands
 
 ```bash

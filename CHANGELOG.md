@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.8.1
+
+- **Global mesh policy injection in `agent-peer setup`**: `--rules` injects a compact,
+  idempotent managed marker block into each harness's global instruction file
+  (`~/.codex/AGENTS.md`, `~/.claude/CLAUDE.md`, `~/.gemini/GEMINI.md`, `~/.agents/AGENTS.md`,
+  `~/.pi/agent/AGENTS.md`, `~/.config/opencode/AGENTS.md`), so a fresh session in any
+  workspace knows core mesh invariants from turn 1 instead of waiting on a lazily-loaded
+  skill. `--no-rules` removes just the managed block, byte-exact, leaving the rest of the
+  file untouched; re-running `--rules` updates the block in place without duplicating it.
+  `--rules`/`--no-rules` are mutually exclusive and opt-in (unchecked by default in the
+  interactive picker) - plain `agent-peer setup` still only installs skills, unchanged.
+- Updated `skills/agy/SKILL.md`, `skills/codex/SKILL.md`, and `skills/claude/SKILL.md`
+  with explicit per-harness standby invariants and a turn-end checklist, grounded in
+  live-verified runtime behavior rather than assumed worst-case claims.
+
 ## 0.8.0
 
 - **`follow-all` opt-in for shared threads**: `agent-peer thread <id> --timeout N --follow`

@@ -19,7 +19,7 @@ from .codex_status import format_codex_status, get_codex_status_dict
 from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, atomic_write_json, SESSIONS_DIR, SOCKET_DIR
 from . import agy_live
 from . import __version__
-from . import harness_detect, setup_tui, update_check
+from . import harness_detect, setup_rules, setup_tui, update_check
 
 def cmd_list(args):
     sessions = get_active_sessions()
@@ -382,7 +382,19 @@ def cmd_setup(args):
         for e in entries:
             state = e["evidence"] if e["installed"] else "not detected"
             have = "skill installed" if e["skill_present"] else "skill missing"
-            print(f"{e['id']:10} {e['label']:22} {state} [{have}]")
+            rules_have = "rules injected" if e.get("rules_present") else "rules absent"
+            print(f"{e['id']:10} {e['label']:22} {state} [{have}] [{rules_have}]")
+        return
+
+    rules_opt_in = getattr(args, "rules", False)
+
+    if getattr(args, "no_rules", False) and not (args.all or args.harness):
+        rule_targets = {e["id"] for e in entries if e.get("rules_present") or e["installed"]}
+        rules_res = setup_rules.remove_rules(sorted(rule_targets))
+        for hid in rules_res["removed"]:
+            print(f"removed rules for {hid}: {by_id[hid]['rules_target']}")
+        for hid in rules_res["missing"]:
+            print(f"no rules to remove for {hid}")
         return
 
     if args.harness:
@@ -397,19 +409,36 @@ def cmd_setup(args):
         initial = set()
     else:
         try:
-            selected = setup_tui.pick_harnesses(entries)
+            selected, tui_rules = setup_tui.pick_harnesses(entries)
+            if tui_rules:
+                rules_opt_in = True
         except RuntimeError as exc:
             print(f"agent-peer setup: {exc}", file=sys.stderr)
             sys.exit(2)
         initial = setup_tui._initial_checked(entries)
 
+    if getattr(args, "no_rules", False):
+        rule_targets = selected if args.harness else {e["id"] for e in entries if e["installed"] or e.get("rules_present")}
+        rules_res = setup_rules.remove_rules(sorted(rule_targets))
+        for hid in rules_res["removed"]:
+            print(f"removed rules for {hid}: {by_id[hid]['rules_target']}")
+        for hid in rules_res["missing"]:
+            print(f"no rules to remove for {hid}")
+        if not args.remove:
+            return
+
     if args.remove:
-        targets = selected if args.harness else {e["id"] for e in entries if e["skill_present"]}
-        result = setup_tui.remove_skills(sorted(targets))
+        skill_targets = selected if args.harness else {e["id"] for e in entries if e["skill_present"]}
+        result = setup_tui.remove_skills(sorted(skill_targets))
         for hid in result["removed"]:
             print(f"removed {hid}: {by_id[hid]['target']}")
         for hid in result["missing"]:
             print(f"nothing to remove for {hid}")
+        if rules_opt_in:
+            rule_targets = selected if args.harness else {e["id"] for e in entries if e.get("rules_present") or e["skill_present"]}
+            rules_res = setup_rules.remove_rules(sorted(rule_targets))
+            for hid in rules_res["removed"]:
+                print(f"removed rules for {hid}: {by_id[hid]['rules_target']}")
         return
 
     to_install = sorted(selected - initial) if not (args.all or args.harness) else sorted(selected)
@@ -418,14 +447,23 @@ def cmd_setup(args):
         result = setup_tui.remove_skills(to_remove)
         for hid in result["removed"]:
             print(f"removed {hid}: {by_id[hid]['target']}")
-    if not to_install and not to_remove:
+    if not to_install and not to_remove and not rules_opt_in:
         print("all set - every selected harness's skill is already installed")
         return
-    result = setup_tui.install_skills(to_install)
-    for hid in result["installed"]:
-        print(f"installed {hid}: {by_id[hid]['target']}")
-    for hid in result["skipped"]:
-        print(f"skipped {hid}: bundled skill not found in this install", file=sys.stderr)
+    if to_install:
+        result = setup_tui.install_skills(to_install)
+        for hid in result["installed"]:
+            print(f"installed {hid}: {by_id[hid]['target']}")
+        for hid in result["skipped"]:
+            print(f"skipped {hid}: bundled skill not found in this install", file=sys.stderr)
+
+    if rules_opt_in:
+        rules_targets = sorted(selected)
+        if not rules_targets:
+            rules_targets = sorted({e["id"] for e in entries if e["installed"]})
+        rules_res = setup_rules.install_rules(rules_targets)
+        for hid in rules_res["installed"]:
+            print(f"injected rules for {hid}: {by_id[hid]['rules_target']}")
 
 def main():
     parser = argparse.ArgumentParser(
@@ -527,6 +565,9 @@ def main():
     p_setup = subparsers.add_parser("setup", help="Detect installed harnesses and install/remove their agent-peer skills")
     p_setup.add_argument("--all", action="store_true", help="Install skills for all detected harnesses without the interactive picker")
     p_setup.add_argument("--harness", action="append", default=[], metavar="ID", help="Install this harness's skill (repeatable; use with --remove to uninstall)")
+    rules_group = p_setup.add_mutually_exclusive_group()
+    rules_group.add_argument("--rules", action="store_true", help="Inject mesh discipline into user-global instruction files (~/.codex/AGENTS.md, ~/.claude/CLAUDE.md, etc.)")
+    rules_group.add_argument("--no-rules", action="store_true", help="Remove injected mesh discipline from user-global instruction files without touching installed skills")
     p_setup.add_argument("--remove", action="store_true", help="Remove instead of install")
     p_setup.add_argument("--list", action="store_true", help="Show detection results without changing anything")
     p_setup.set_defaults(func=cmd_setup)

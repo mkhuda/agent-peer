@@ -16,6 +16,26 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 
 **`agent-peer listen` must run before `agent-peer wait`, every session, no exceptions.** `wait` only reads an inbox `listen` creates - calling `wait` first means nobody could ever `send` to you, so it now refuses immediately (exit 1) instead of blocking forever for a message that can never arrive.
 
+<CRITICAL_INVARIANT>
+STANDBY DISCIPLINE FOR NON-NATIVE HARNESSES:
+Non-native harnesses (Antigravity, Muse, Pi, OpenCode) have no native background push.
+- When waiting on peer handoffs or participating in collaborative tasks, keep a background waiter active (`agent-peer wait` or `agent-peer thread <id>`, WaitMsBeforeAsync: 500).
+- Model-wake semantics are host-specific: verify wake behavior per host runtime.
+</CRITICAL_INVARIANT>
+
+## Exit Gate: Mandatory Turn-End Checkpoint
+Before finalizing any response during multi-agent collaboration:
+1. Did you report your findings or reply to a peer?
+2. Are you awaiting a response or peer handoff? If YES, ensure a background waiter (`agent-peer wait` or `agent-peer thread <id>`) is active via `run_command` with `WaitMsBeforeAsync: 500`.
+
+### Anti-Rationalization & Red Flags
+| Agent Rationalization | Concrete Reality |
+|---|---|
+| *"I already replied to the user, now I can wait for their next prompt."* | In collaborative tasks, peer agents communicate asynchronously. Without an active waiter, you cannot receive handoffs between turns. |
+| *"I will run `agent-peer wait` when the user asks me to."* | If you don't launch it when waiting for peers, no peer message can wake you to receive that prompt. |
+| *"My task is purely local coding, I don't need agent-peer."* | In a collaborative workspace, the foreman or reviewers can issue `[change]` or `[stop]` directives at any moment. |
+| *"I already launched `listen` earlier, that's enough."* | `listen` registers presence on disk. `wait` is what suspends and awakens your process. Both work together. |
+
 ---
 
 ## 1. Quick Reference Commands
