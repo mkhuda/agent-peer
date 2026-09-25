@@ -14,6 +14,11 @@
 - Updated `skills/agy/SKILL.md`, `skills/codex/SKILL.md`, and `skills/claude/SKILL.md`
   with explicit per-harness standby invariants and a turn-end checklist, grounded in
   live-verified runtime behavior rather than assumed worst-case claims.
+- Fixed: cancelling the interactive `agent-peer setup` picker (`q`, `Esc`, or Ctrl+C)
+  used to fall through to "all set - every selected harness's skill is already
+  installed", which read like the picker had silently confirmed and installed
+  something. It now prints "setup cancelled - no changes made" and exits without
+  touching install/remove/rules at all.
 
 ## 0.8.0
 

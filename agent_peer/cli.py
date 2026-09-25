@@ -415,6 +415,9 @@ def cmd_setup(args):
         except RuntimeError as exc:
             print(f"agent-peer setup: {exc}", file=sys.stderr)
             sys.exit(2)
+        if selected is None:
+            print("setup cancelled - no changes made")
+            return
         initial = setup_tui._initial_checked(entries)
 
     if getattr(args, "no_rules", False):

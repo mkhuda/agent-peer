@@ -80,7 +80,7 @@ def _pick_harnesses_windows(entries):
     try:
         while True:
             sys.stdout.write("\x1b[H\x1b[J")
-            print("agent-peer setup - Space toggles, Enter confirms, a/n all/none, q quits\n")
+            print("agent-peer setup - Space toggles, Enter confirms, a/n all/none, q/Esc cancels\n")
             for i, entry in enumerate(entries):
                 prefix = "> " if i == cursor else "  "
                 print(prefix + _entry_line(entry, checked))
@@ -102,12 +102,14 @@ def _pick_harnesses_windows(entries):
                     rules_enabled = not rules_enabled
             elif ch == "\r":
                 return set(checked), rules_enabled
-            elif ch in ("q", "\x1b"):
-                return _initial_checked(entries), False
+            elif ch in ("q", "Q", "\x1b", "\x03"):
+                return None, False
             elif ch == "a":
                 checked.update(e["id"] for e in entries)
             elif ch == "n":
                 checked.clear()
+    except KeyboardInterrupt:
+        return None, False
     finally:
         sys.stdout.write("\x1b[?25h")
         sys.stdout.flush()
@@ -116,7 +118,7 @@ def _pick_harnesses_windows(entries):
 def pick_harnesses(entries):
     """Checkbox picker (curses on POSIX, msvcrt on Windows). Returns
     (selected_harness_ids, rules_enabled). Space toggles, Enter confirms,
-    a/n select-all/none, q quits keeping initial state. Raises RuntimeError with no TTY.
+    a/n select-all/none, q/Esc cancels. Raises RuntimeError with no TTY.
     """
     if not (sys.stdin.isatty() and sys.stdout.isatty()):
         raise RuntimeError("no TTY on stdin - run `agent-peer setup --all` instead")
@@ -137,7 +139,7 @@ def pick_harnesses(entries):
         cursor = 0
         while True:
             stdscr.clear()
-            stdscr.addstr(0, 0, "agent-peer setup - Space toggles, Enter confirms, a/n all/none, q quits")
+            stdscr.addstr(0, 0, "agent-peer setup - Space toggles, Enter confirms, a/n all/none, q/Esc cancels")
             for i, entry in enumerate(entries):
                 line = _entry_line(entry, checked)
                 attr = curses.A_REVERSE if i == cursor else curses.A_NORMAL
@@ -155,8 +157,8 @@ def pick_harnesses(entries):
                     rules_enabled = not rules_enabled
             elif key in (curses.KEY_ENTER, ord("\n"), ord("\r")):
                 return set(checked), rules_enabled
-            elif key in (ord("q"), 27):
-                return _initial_checked(entries), False
+            elif key in (ord("q"), ord("Q"), 27, 3):
+                return None, False
             elif key == ord("a"):
                 checked.update(e["id"] for e in entries)
             elif key == ord("n"):
@@ -168,5 +170,7 @@ def pick_harnesses(entries):
 
     try:
         return curses.wrapper(_run)
+    except KeyboardInterrupt:
+        return None, False
     except curses.error as exc:
         raise RuntimeError("no TTY on stdin - run `agent-peer setup --all` instead") from exc

@@ -218,6 +218,36 @@ class SetupCliTest(unittest.TestCase):
         self.assertNotEqual(proc.returncode, 0)
         self.assertIn("--all", proc.stderr)
 
+    def test_setup_cancellation_prints_cancelled_and_no_changes(self):
+        from agent_peer import cli
+        from unittest.mock import patch
+        import argparse
+
+        with patch.object(setup_tui, "pick_harnesses", return_value=(None, False)):
+            with patch("sys.stdout") as mock_stdout:
+                parser = argparse.ArgumentParser()
+                parser.add_argument("--all", action="store_true")
+                parser.add_argument("--harness", action="append", default=[])
+                parser.add_argument("--rules", action="store_true")
+                parser.add_argument("--no-rules", action="store_true")
+                parser.add_argument("--remove", action="store_true")
+                parser.add_argument("--list", action="store_true")
+                args = parser.parse_args([])
+                with patch("os.environ", dict(os.environ, HOME=self.home)):
+                    cli.cmd_setup(args)
+        # Verify no files installed
+        for hid in ("agy", "codex", "muse", "pi", "opencode", "claude"):
+            self.assertFalse(os.path.isfile(harness_detect.target_path(hid, self.home)))
+
+    def test_pick_harnesses_keyboard_interrupt_returns_none_false(self):
+        from unittest.mock import patch
+        with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):
+            with patch("curses.wrapper", side_effect=KeyboardInterrupt):
+                entries = harness_detect.detect_all(self.home)
+                selected, rules = setup_tui.pick_harnesses(entries)
+                self.assertIsNone(selected)
+                self.assertFalse(rules)
+
 
 if __name__ == "__main__":
     unittest.main()
