@@ -171,7 +171,10 @@ def _mention_tokens(content: str):
 
 def _mentions(content: str, name: str) -> bool:
     tokens = _mention_tokens(content)
-    return name in tokens or "all" in tokens or "[stop]" in content
+    # [stop] must go through the same code-span stripping as @tokens - a
+    # doc example quoting the "[stop]" prefix convention must not itself
+    # trigger a real stop-knock.
+    return name in tokens or "all" in tokens or "[stop]" in _strip_code_spans(content)
 
 
 def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str, int]]:

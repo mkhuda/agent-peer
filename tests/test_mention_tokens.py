@@ -9,7 +9,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from agent_peer.thread import _mention_tokens
+from agent_peer.thread import _mention_tokens, _mentions
 
 BT3 = "`" * 3
 TILDE3 = "~" * 3
@@ -81,6 +81,20 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
 
     def test_fence_closer_may_have_surrounding_whitespace(self):
         self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n  {BT3}  \n@bob"), {"bob"})
+
+
+class StopKeywordCodeSpanTest(unittest.TestCase):
+    # Regression: [stop] was checked against raw content, bypassing the
+    # same code-span stripping @mentions already got - a doc example
+    # quoting the "[stop]" prefix convention shouldn't trigger a real one.
+    def test_quoted_stop_does_not_trigger(self):
+        self.assertFalse(_mentions("the doc says `[stop]` means halt immediately", "someone"))
+
+    def test_fenced_stop_does_not_trigger(self):
+        self.assertFalse(_mentions(f"{BT3}\ndocs example: [stop] prefix\n{BT3}", "someone"))
+
+    def test_real_stop_still_triggers(self):
+        self.assertTrue(_mentions("[stop] halt now", "someone"))
 
 
 if __name__ == "__main__":

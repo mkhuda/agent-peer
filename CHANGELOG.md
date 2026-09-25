@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.8.8
+
+- Fixed: the `[stop]` urgency keyword bypassed the code-span stripping added for `@mention`s
+  - a message quoting the `[stop]` prefix convention as a literal example (in backticks or a
+  fenced block) still triggered a real stop-knock. It now goes through the same stripping.
+
 ## 0.8.7
 
 - Fixed: fenced code block stripping (0.8.4) closed on any occurrence of the fence
