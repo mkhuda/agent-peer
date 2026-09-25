@@ -94,10 +94,22 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
     return record
 
 
+_FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+
+def _strip_code_spans(content: str) -> str:
+    """Drop fenced and inline code spans before mention extraction - a name
+    quoted as a literal code example ("the socket at `/tmp/.../@name.sock`")
+    must not be read as an @mention."""
+    content = _FENCED_CODE_RE.sub(" ", content)
+    return _INLINE_CODE_RE.sub(" ", content)
+
+
 def _mention_tokens(content: str):
     # Token-exact (not substring): "@codex-8763" must not match a session
     # literally named "codex-8763-2" in another project.
-    return set(re.findall(r"@([A-Za-z0-9_.\-]+)", content))
+    return set(re.findall(r"@([A-Za-z0-9_.\-]+)", _strip_code_spans(content)))
 
 
 def _mentions(content: str, name: str) -> bool:
@@ -114,7 +126,10 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     `follow_all` opt-in (0035 - every other participant's post knocks, not
     just mentions - exact sender-identity comparison, never a substring
     match), and a mesh session with no presence entry at all explicitly
-    mentioned (one-shot, never enrolled - knock is not an invite)."""
+    mentioned (one-shot, never enrolled - knock is not an invite; scoped to
+    the sender's own workspace only - a plain @name must not page an
+    unrelated session in a different project). Mentions inside inline or
+    fenced code spans are never read as @mentions at all, in any path."""
     try:
         sessions = get_active_sessions()
     except Exception:
@@ -138,13 +153,23 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
             continue
         targets.append((name, pid))
     pushed = {name for name, _ in targets}
+    sender_cwd = os.path.normpath(os.getcwd())
     for token in _mention_tokens(content):
-        # Mesh-wide summons: exact name, no presence entry (the presence
-        # loop above already decided everyone inside the room), no enroll.
+        # Same-workspace summons only: exact name, no presence entry (the
+        # presence loop above already decided everyone inside the room), no
+        # enroll. Scoped to the sender's own cwd - a plain @name in chat must
+        # not page an unrelated session in a different project just because
+        # it happens to share a name (confirmed live: a narrative mention of
+        # another project's session name pushed the full message to it).
+        # Cross-project summons are a deliberate, separate action (the
+        # interactive invite picker, `join --all`), not implied by @name.
         if token == sender or token in pushed or token in presence:
             continue
         session = next((s for s in sessions if s.get("name") == token), None)
         if session is None:
+            continue
+        session_cwd = session.get("cwd")
+        if not session_cwd or os.path.normpath(os.path.expanduser(session_cwd)) != sender_cwd:
             continue
         pid = session.get("pid")
         targets.append((token, pid if isinstance(pid, int) else -1))

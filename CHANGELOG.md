@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.8.4
+
+- Fixed: a shared thread's mesh-wide `@mention` summons (docs/tasks/0029) could knock a
+  session in a completely different, unrelated project - a name mentioned purely as
+  narrative text ("Claude (@some-other-session)...") was indistinguishable from a real
+  summons, and the target got the full post pushed to it. Mesh-wide `@mention` summons are
+  now scoped to the sender's own workspace by default; a name quoted inside inline or
+  fenced code is also never read as a mention at all, in any thread.
+
 ## 0.8.3
 
 - Fixed two follow-up gaps in 0.8.2's agy quota-matching fix, found in review: the token

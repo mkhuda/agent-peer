@@ -115,9 +115,12 @@ class PresenceLifecycleTest(unittest.TestCase):
             stop_cli(proc)
         self._home_cm.__exit__(None, None, None)
 
-    def _native_session(self, name, status="idle"):
+    def _native_session(self, name, status="idle", cwd=REPO_ROOT):
         """Craft a native-Claude-style registry entry (not managed) whose
-        socket is a dummy server. Returns the server (caller must close)."""
+        socket is a dummy server. Returns the server (caller must close).
+        cwd defaults to REPO_ROOT because _post()/run_cli() always runs the
+        poster with cwd=REPO_ROOT - pass a different one to simulate a
+        session registered from another project."""
         pid = os.getpid()  # alive by definition
         sock_path = os.path.join(self.home, f"{name}.sock")
         server = DummyNativeServer(sock_path)
@@ -130,6 +133,7 @@ class PresenceLifecycleTest(unittest.TestCase):
                     "status": status,
                     "managedByAgentPeer": False,
                     "messagingSocketPath": sock_path,
+                    "cwd": cwd,
                 },
                 fh,
             )
@@ -283,6 +287,39 @@ class PresenceLifecycleTest(unittest.TestCase):
             self._post("t6", "bob", "more banter")
             time.sleep(1)  # fanout runs inside the post call; absence after is final
             self.assertEqual(server.text().count("[thread:"), 1, "one-shot: banter after must not push")
+        finally:
+            server.close()
+
+    def test_mesh_wide_mention_does_not_knock_a_different_workspace(self):
+        # Confirmed live: a narrative mention of a session name from a
+        # different project (e.g. "Claude (@other-project-session)") pushed
+        # the full message to it. Mesh-wide summons via plain @mention must
+        # be scoped to the sender's own workspace; cross-project summons are
+        # a deliberate, separate action.
+        server = self._native_session("remote-zoe", cwd=os.path.join(REPO_ROOT, "..", "other-project"))
+        try:
+            self.assertNotIn("remote-zoe", _presence(self.home, "t6b"))
+            self._post("t6b", "bob", "@remote-zoe come here please")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "a different-workspace session must not be knocked")
+        finally:
+            server.close()
+
+    def test_mention_inside_code_span_does_not_knock(self):
+        server = self._native_session("quoted-name")
+        try:
+            self.assertNotIn("quoted-name", _presence(self.home, "t6c"))
+            self._post("t6c", "bob", "the socket path convention looks like `@quoted-name`, see?")
+            time.sleep(1)  # fanout runs inside the post call; absence after is final
+            self.assertEqual(server.text(), "", "a name quoted in inline code must not be read as a mention")
+            self._post("t6c", "bob", "```\nexample: @quoted-name\n```")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "a name quoted in a fenced code block must not be read as a mention")
+            self._post("t6c", "bob", "@quoted-name for real this time")
+            self.assertTrue(
+                wait_until(lambda: "for real this time" in server.text(), timeout=5),
+                "a plain, unquoted @mention must still knock",
+            )
         finally:
             server.close()
 
