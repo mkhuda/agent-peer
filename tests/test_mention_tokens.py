@@ -45,13 +45,18 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
     def test_mention_outside_code_span_still_extracted(self):
         self.assertEqual(_mention_tokens("`quoted @bob` but also plain @alice"), {"alice"})
 
-    def test_closer_run_longer_than_opener_still_closes(self):
-        # Valid CommonMark for FENCED blocks: a closing fence run may be
-        # longer than the opener's (same character). The backreference only
-        # needs to find its N-length run as a substring, which a longer run
-        # of the same character always contains.
+    def test_closer_run_longer_than_opener_still_closes_on_its_own_line(self):
+        # Valid CommonMark: a closing fence run may be longer than the
+        # opener's (same character), as long as the closing line has only
+        # that run (plus optional whitespace) on it.
         self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}`"), set())
-        self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}` @bob"), {"bob"})
+
+    def test_fence_closer_with_trailing_content_is_not_a_valid_closer(self):
+        # A line with fence characters followed by other text isn't a valid
+        # CommonMark closing fence - the block stays open, so this session's
+        # deliberate fallback (unclosed fence = treat as literal text, don't
+        # strip) leaves both mentions visible rather than guessing.
+        self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n{BT3}` @bob"), {"alice", "bob"})
 
     def test_odd_backtick_run_inside_single_span_does_not_leak_mention(self):
         # Regression: a stray ``` (three backticks, not meant as a fence)
@@ -65,6 +70,17 @@ class MentionTokensCodeSpanTest(unittest.TestCase):
         # exactly the same run length as the opener - a run of a different
         # length is just literal backticks, not a delimiter pair.
         self.assertEqual(_mention_tokens("`a````b` @alice"), {"alice"})
+
+    def test_fence_closer_must_be_on_its_own_line_not_mid_content(self):
+        # Regression: a literal ``` mentioned mid-line inside a fenced
+        # block's own content (e.g. discussing markdown syntax) used to
+        # close the fence early under a naive regex, exposing whatever came
+        # after it up to the real closer.
+        content = f"{BT3}\nsome code, e.g. a line with {BT3} inside it\n@alice\n{BT3}"
+        self.assertEqual(_mention_tokens(content), set())
+
+    def test_fence_closer_may_have_surrounding_whitespace(self):
+        self.assertEqual(_mention_tokens(f"{BT3}\n@alice\n  {BT3}  \n@bob"), {"bob"})
 
 
 if __name__ == "__main__":

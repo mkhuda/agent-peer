@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.8.7
+
+- Fixed: fenced code block stripping (0.8.4) closed on any occurrence of the fence
+  delimiter, including one appearing mid-line inside the block's own content (e.g. a
+  code example that itself mentions a fence). A closing fence now has to be alone on its
+  own line, per the same rule Markdown itself uses, so content after a mid-line delimiter
+  stays correctly inside the block.
+
 ## 0.8.6
 
 - Fixed: inline code-span stripping (0.8.4/0.8.5) used a regex that could mispair backtick

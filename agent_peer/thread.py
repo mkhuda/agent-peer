@@ -94,8 +94,39 @@ def append_thread_message(thread_id: str, sender: str, content: str) -> Dict[str
     return record
 
 
-_FENCED_CODE_RE = re.compile(r"(```|~~~)[\s\S]*?\1")
+_FENCE_LINE_RE = re.compile(r"^[ \t]*(`{3,}|~{3,})")
 _BACKTICK_RUN_RE = re.compile(r"`+")
+
+
+def _strip_fenced_code_blocks(content: str) -> str:
+    """CommonMark fenced code block rule: an opening fence line (a run of
+    >=3 of the same character) is closed by a LATER line that is only a
+    same-character run of >=N of that character - not by that substring
+    appearing anywhere, including mid-line inside the block's own content
+    (e.g. a code block whose content itself mentions ``` as an example)."""
+    lines = content.split("\n")
+    out = []
+    i = 0
+    while i < len(lines):
+        m = _FENCE_LINE_RE.match(lines[i])
+        if not m:
+            out.append(lines[i])
+            i += 1
+            continue
+        char, n = m.group(1)[0], len(m.group(1))
+        close_idx = next(
+            (
+                j for j in range(i + 1, len(lines))
+                if re.fullmatch(rf"[ \t]*{re.escape(char)}{{{n},}}[ \t]*", lines[j])
+            ),
+            None,
+        )
+        if close_idx is None:
+            out.append(lines[i])
+            i += 1
+            continue
+        i = close_idx + 1
+    return "\n".join(out)
 
 
 def _strip_inline_code_spans(content: str) -> str:
@@ -128,7 +159,7 @@ def _strip_code_spans(content: str) -> str:
     """Drop fenced and inline code spans before mention extraction - a name
     quoted as a literal code example ("the socket at `/tmp/.../@name.sock`")
     must not be read as an @mention."""
-    content = _FENCED_CODE_RE.sub(" ", content)
+    content = _strip_fenced_code_blocks(content)
     return _strip_inline_code_spans(content)
 
 
