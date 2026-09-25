@@ -86,6 +86,46 @@ print(sorted(s['name'] for s in _candidate_sessions(all_scope=False)))
                 proc.wait(timeout=5)
 
 
+def test_mention_candidates_union_thread_participants_and_same_cwd_sessions():
+    """@mention Tab-completion pool: this thread's own participants (any
+    cwd - they already joined) union same-cwd ALIVE sessions (any thread) -
+    not the whole mesh, and never includes the asking participant's own
+    name."""
+    with isolated_home() as home:
+        sessions_dir = os.path.join(home, ".claude", "sessions")
+        os.makedirs(sessions_dir, exist_ok=True)
+        here = REPO_ROOT
+        elsewhere = os.path.join(home, "elsewhere-project")
+
+        procs = [subprocess.Popen(["sleep", "5"]) for _ in range(2)]
+        try:
+            for proc, name, cwd in zip(procs, ("in-scope", "out-of-scope"), (here, elsewhere)):
+                pid = proc.pid
+                with open(os.path.join(sessions_dir, f"{pid}.json"), "w", encoding="utf-8") as f:
+                    json.dump({"pid": pid, "name": name, "cwd": cwd, "status": "idle"}, f)
+                with open(os.path.join(sessions_dir, f"{pid}.{'a' * 64}.key"), "w", encoding="utf-8") as f:
+                    json.dump({"peerToken": "t"}, f)
+
+            # "out-of-scope" is also a thread participant despite being in a
+            # different cwd - must still show up (already joined = relevant).
+            run_cli(["send", "--thread", "mtc", "hi", "--sender", "out-of-scope"], home)
+            run_cli(["thread", "mtc", "--name", "out-of-scope", "--timeout", "1"], home)
+
+            script = f"""
+import os, sys
+sys.path.insert(0, {REPO_ROOT!r})
+os.chdir({here!r})
+from agent_peer.join import _mention_candidates
+print(sorted(_mention_candidates("mtc", "me")))
+"""
+            r = _run_py(home, script)
+            assert r.stdout.strip() == "['in-scope', 'out-of-scope']", (r.stdout, r.stderr)
+        finally:
+            for proc in procs:
+                proc.terminate()
+                proc.wait(timeout=5)
+
+
 def test_run_join_prints_backlog_sends_lines_and_exits_on_eof():
     with isolated_home() as home:
         run_cli(["send", "--thread", "sync", "backlog from other agent", "--sender", "other-agent"], home)

@@ -31,8 +31,20 @@ sys.stdout.write("\\nRESULT:" + repr(result) + "\\n")
 sys.stdout.flush()
 """
 
+_CHILD_SCRIPT_WITH_MENTION_CANDIDATES = f"""
+import sys
+sys.path.insert(0, {REPO_ROOT!r})
+from agent_peer.rawline import LineEditor, read_message
+sys.stderr.write("CHILD READY\\n"); sys.stderr.flush()
+editor = LineEditor("> ")
+editor.mention_candidates = ["agy-38920", "agy-41492", "codex-7284"]
+result = read_message(editor)
+sys.stdout.write("\\nRESULT:" + repr(result) + "\\n")
+sys.stdout.flush()
+"""
 
-def _run_pty(write_sequence, timeout=6):
+
+def _run_pty(write_sequence, timeout=6, child_script=_CHILD_SCRIPT):
     """Spawns a real pty, waits for the child to actually reach cbreak mode
     (not a fixed sleep - a race with import time is exactly how this test
     was flaky before), sends `write_sequence`, and returns the captured
@@ -46,7 +58,7 @@ def _run_pty(write_sequence, timeout=6):
         os.dup2(slave, 1)
         os.dup2(slave, 2)
         os.close(slave)
-        os.execvp(sys.executable, [sys.executable, "-c", _CHILD_SCRIPT])
+        os.execvp(sys.executable, [sys.executable, "-c", child_script])
     else:
         os.close(slave)
         try:
@@ -130,6 +142,59 @@ def test_reset_clears_cursor_position_not_just_the_text():
     assert e.lines == [""]
 
 
+def test_mention_completion_single_match():
+    e = LineEditor("> ")
+    e.mention_candidates = ["agy-38920", "codex-7284"]
+    e.append_char("hi @cod")
+    e.complete_mention()
+    assert e.lines[-1] == "hi @codex-7284"
+    assert e.cursor_col == len("hi @codex-7284")
+
+
+def test_mention_completion_cycles_through_multiple_matches_on_repeated_tab():
+    e = LineEditor("> ")
+    e.mention_candidates = ["agy-38920", "agy-41492", "codex-7284"]
+    e.append_char("hi @a")
+    e.complete_mention()
+    first = e.lines[-1]
+    e.complete_mention()
+    second = e.lines[-1]
+    e.complete_mention()  # cycles back around
+    third = e.lines[-1]
+    assert {first, second} == {"hi @agy-38920", "hi @agy-41492"}
+    assert first != second
+    assert third == first
+
+
+def test_mention_completion_no_match_is_a_no_op():
+    e = LineEditor("> ")
+    e.mention_candidates = ["agy-38920"]
+    e.append_char("hi @zzz")
+    e.complete_mention()
+    assert e.lines[-1] == "hi @zzz"
+
+
+def test_mention_completion_only_triggers_inside_an_at_token():
+    e = LineEditor("> ")
+    e.mention_candidates = ["agy-38920"]
+    e.append_char("hello world")
+    e.complete_mention()
+    assert e.lines[-1] == "hello world"
+
+
+def test_mention_completion_cycle_resets_after_another_edit():
+    """Typing (or any other edit) between two Tabs must start a fresh
+    match/cycle, not continue the stale one."""
+    e = LineEditor("> ")
+    e.mention_candidates = ["agy-38920", "agy-41492"]
+    e.append_char("@a")
+    e.complete_mention()
+    assert e.lines[-1] == "@agy-38920"
+    e.append_char(" hi @a")
+    e.complete_mention()
+    assert e.lines[-1] == "@agy-38920 hi @agy-38920"
+
+
 pytestmark = pytest.mark.skipif(sys.platform == "win32", reason="pty is POSIX-only; rawline's Windows path uses msvcrt instead")
 
 
@@ -191,6 +256,22 @@ def test_word_right_jumps_to_next_word_end():
     assert "RESULT:'hello worldX'" in _run_pty(
         [b"hello world", b"\x1b[D" * 5, b"\x1bf", b"X", b"\r"]
     )
+
+
+def test_tab_completes_an_at_mention_against_real_tty_input():
+    assert "RESULT:'hi @codex-7284'" in _run_pty(
+        [b"hi @cod", b"\t", b"\r"], child_script=_CHILD_SCRIPT_WITH_MENTION_CANDIDATES
+    )
+
+
+def test_tab_cycles_ambiguous_at_mention_matches():
+    # Two Tabs on "@a" (matching both agy-38920 and agy-41492) must land on
+    # the SECOND candidate, not the first - proves it actually cycles
+    # rather than re-resolving to the same match every press.
+    out = _run_pty(
+        [b"hi @a", b"\t", b"\t", b"\r"], child_script=_CHILD_SCRIPT_WITH_MENTION_CANDIDATES
+    )
+    assert "RESULT:'hi @agy-41492'" in out
 
 
 

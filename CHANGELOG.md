@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.1
+
+- **Tab-completes `@mentions` in `agent-peer join`**: type `@` plus a few letters and press
+  Tab to complete it against a live candidate pool - this thread's own participants
+  (regardless of project) union any other alive session in the same workspace, same scoping
+  `setup`'s workspace-scoped summons already uses. Repeated Tab (with no other typing in
+  between) cycles through multiple matches instead of only ever completing the first one.
+
 ## 0.9.0
 
 - **Redesigned shared-thread view** (`agent-peer join`/`thread`/`logs --thread`): each

@@ -31,6 +31,17 @@ def _candidate_sessions(all_scope: bool):
     ]
 
 
+def _mention_candidates(thread_id: str, participant: str) -> list:
+    """Tab-completion pool for @mention: this thread's own participants
+    (they're relevant regardless of cwd - they already joined) union any
+    ALIVE session in the same workspace (same cwd() scoping _candidate_
+    sessions already uses for the invite picker, and fanout_targets' own
+    mesh-wide-summons scoping) - not the whole mesh."""
+    names = {n for n in read_thread_presence(thread_id).keys() if n != participant}
+    names |= {s.get("name") for s in _candidate_sessions(all_scope=False) if s.get("name") != participant}
+    return sorted(names)
+
+
 def _render_session(s):
     return f"{s.get('name')}  ({s.get('agentType', '?')}, {s.get('status', 'idle')}, {s.get('cwd', '?')})"
 
@@ -152,6 +163,11 @@ def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, edit
                     continue  # already visible from your own typed line
                 _print_live(_next_entry(r, use_color, participant, session_cache, last_sender_box), editor)
             touch_thread_presence(thread_id, participant, left=False)
+            if editor is not None:
+                # Keeps @mention Tab-completion candidates live as people
+                # join/leave, without the compose box's blocking read loop
+                # needing to poll for it itself.
+                editor.mention_candidates = _mention_candidates(thread_id, participant)
         except Exception as e:
             print(f"agent-peer: poll tick skipped ({e})", file=sys.stderr)
         stop_event.wait(0.5)
@@ -180,7 +196,7 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     header = format_thread_presence_header(thread_id, use_color)
     if header:
         print(header)
-    print("Type a message and press Enter to send. Ctrl+D to leave.\n")
+    print("Type a message and press Enter to send. Tab completes @mentions. Ctrl+D to leave.\n")
     for r in backlog:
         # unlike _poll_loop, backlog is full history - self-echo suppression
         # there only hides what your own live typing already echoed locally,
@@ -194,6 +210,8 @@ def run_join(thread_id: str, participant: str, invite: bool = False, all_scope: 
     # real terminal and would fail against a pipe.
     use_raw = sys.stdin.isatty()
     editor = LineEditor("> ") if use_raw else None
+    if editor is not None:
+        editor.mention_candidates = _mention_candidates(thread_id, participant)
 
     last_seq_box = [backlog[-1]["seq"] if backlog else 0]
     stop_event = threading.Event()

@@ -27,6 +27,10 @@ class LineEditor:
         # continuation line was never supported (backspace/append already
         # only ever touched the last line), so this doesn't expand that.
         self.cursor_col = 0
+        # @mention Tab-completion: candidate names the caller (join.py)
+        # keeps current - thread-agnostic here, just prefix matching.
+        self.mention_candidates = []
+        self._completion_state = None  # {start, prefix, matches, index} while cycling Tab
 
     def _visual_rows(self) -> int:
         """Physical terminal rows the current buffer occupies, accounting
@@ -49,10 +53,12 @@ class LineEditor:
     def reset(self):
         self.lines = [""]
         self.cursor_col = 0
+        self._completion_state = None
 
     def append_char(self, ch: str):
         """Inserts at the cursor, not always the end - a char typed after
         moving left with the arrow keys must land where the cursor is."""
+        self._completion_state = None
         line = self.lines[-1]
         self.lines[-1] = line[: self.cursor_col] + ch + line[self.cursor_col :]
         self.cursor_col += len(ch)
@@ -60,6 +66,7 @@ class LineEditor:
     def backspace(self):
         """Deletes the char immediately before the cursor, not always the
         last char of the line - same reasoning as append_char."""
+        self._completion_state = None
         if self.cursor_col > 0:
             line = self.lines[-1]
             self.lines[-1] = line[: self.cursor_col - 1] + line[self.cursor_col :]
@@ -69,14 +76,17 @@ class LineEditor:
             self.cursor_col = len(self.lines[-1])
 
     def move_left(self):
+        self._completion_state = None
         self.cursor_col = max(0, self.cursor_col - 1)
 
     def move_right(self):
+        self._completion_state = None
         self.cursor_col = min(len(self.lines[-1]), self.cursor_col + 1)
 
     def move_word_left(self):
         """Skip trailing whitespace then the word before it - the usual
         Option/Alt+Left convention, not just a single character hop."""
+        self._completion_state = None
         line, i = self.lines[-1], self.cursor_col
         while i > 0 and line[i - 1].isspace():
             i -= 1
@@ -85,6 +95,7 @@ class LineEditor:
         self.cursor_col = i
 
     def move_word_right(self):
+        self._completion_state = None
         line, i = self.lines[-1], self.cursor_col
         n = len(line)
         while i < n and line[i].isspace():
@@ -94,8 +105,38 @@ class LineEditor:
         self.cursor_col = i
 
     def newline(self):
+        self._completion_state = None
         self.lines.append("")
         self.cursor_col = 0
+
+    def complete_mention(self):
+        """Tab-completes an in-progress @mention against
+        self.mention_candidates. The first Tab after typing @<partial>
+        completes to the first name starting with that prefix (case-
+        insensitive); each subsequent Tab (with no other edit in between)
+        cycles to the next match. A no-op if the cursor isn't inside an
+        @token, or nothing matches."""
+        line = self.lines[-1]
+        state = self._completion_state
+        if state is None:
+            i = self.cursor_col
+            while i > 0 and not line[i - 1].isspace():
+                i -= 1
+            if i >= self.cursor_col or line[i] != "@":
+                return  # cursor isn't inside an @token
+            prefix = line[i + 1 : self.cursor_col].lower()
+            matches = sorted({c for c in self.mention_candidates if c.lower().startswith(prefix)})
+            if not matches:
+                return
+            state = {"start": i, "matches": matches, "index": -1}
+            self._completion_state = state
+
+        state["index"] = (state["index"] + 1) % len(state["matches"])
+        chosen = state["matches"][state["index"]]
+        start = state["start"]
+        tail = line[self.cursor_col :]
+        self.lines[-1] = line[:start] + "@" + chosen + tail
+        self.cursor_col = start + 1 + len(chosen)
 
     def paste_extend(self, pasted_text: str):
         """Inserts a (possibly multi-line) pasted block at the cursor - text
@@ -103,6 +144,7 @@ class LineEditor:
         pasted line, matching how append_char/backspace already respect
         cursor position. Never submits on its own; the whole paste still
         lands in the compose box for an explicit Enter."""
+        self._completion_state = None
         pasted_text = pasted_text.replace("\r\n", "\n").replace("\r", "\n")
         paste_lines = pasted_text.split("\n")
         line = self.lines[-1]
@@ -277,6 +319,10 @@ def _read_posix(editor: LineEditor):
                 editor.backspace()
                 editor.render()
                 continue
+            if ch == "\t":
+                editor.complete_mention()
+                editor.render()
+                continue
             if ch.isprintable():
                 editor.append_char(ch)
                 editor.render()
@@ -321,6 +367,10 @@ def _read_windows(editor: LineEditor):
             return editor.text()
         if ch == "\x08":
             editor.backspace()
+            editor.render()
+            continue
+        if ch == "\t":
+            editor.complete_mention()
             editor.render()
             continue
         if ch.isprintable():
