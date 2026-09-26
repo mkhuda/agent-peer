@@ -503,9 +503,12 @@ class AutoNameFixOneTest(unittest.TestCase):
         self.protocol.detect_harness_identity = self._orig_detect
         self._tmp.cleanup()
 
-    def _register(self, pid, name):
+    def _register(self, pid, name, harness_pid=None):
+        data = {"name": name}
+        if harness_pid is not None:
+            data["harnessPid"] = harness_pid
         with open(os.path.join(self._tmp.name, f"{pid}.json"), "w", encoding="utf-8") as fh:
-            json.dump({"name": name}, fh)
+            json.dump(data, fh)
 
     def test_registered_live_pid_returns_official_name(self):
         self._register(os.getpid(), "agent-peer-e4")
@@ -520,6 +523,23 @@ class AutoNameFixOneTest(unittest.TestCase):
     def test_unregistered_falls_back_to_invented(self):
         self.protocol.detect_harness_identity = lambda max_depth=6: ("claude", 999998)
         self.assertEqual(self.protocol.auto_session_name(), "claude-999998")
+
+    def test_listener_run_as_subprocess_matches_by_harness_pid_not_listener_pid(self):
+        """agy/muse run `listen` as a child process: the registered pid
+        (the listener's own) never equals the harness's own pid that every
+        other command detects. Regression test for the bug that made
+        `agent-peer thread` keep minting `agy-<pid>` instead of reusing the
+        name registered by `listen --name orchestrator`."""
+        listener_pid = os.getpid()  # stands in for the listener subprocess's own pid
+        harness_pid = 1516  # stands in for agy's own long-lived pid
+        self._register(listener_pid, "orchestrator", harness_pid=harness_pid)
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("agy", harness_pid)
+        self.assertEqual(self.protocol.auto_session_name(), "orchestrator")
+
+    def test_harness_pid_mismatch_does_not_match_a_different_listener(self):
+        self._register(os.getpid(), "orchestrator", harness_pid=1516)
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("agy", 4242)
+        self.assertEqual(self.protocol.auto_session_name(), "agy-4242")
 
 
 if __name__ == "__main__":

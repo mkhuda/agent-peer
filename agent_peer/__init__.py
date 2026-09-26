@@ -1,3 +1,3 @@
 """agent-peer: Real-time IPC gateway between Claude Code sessions and external agents."""
 
-__version__ = "0.9.1"
+__version__ = "0.9.2"

@@ -151,7 +151,17 @@ def auto_session_name() -> str:
             from .registry import get_active_sessions
 
             for session in get_active_sessions():
-                if session.get("pid") == pid and session.get("alive", True):
+                # harnessPid is the calling harness's own pid (set at `listen`
+                # time), distinct from session["pid"] (the listener
+                # subprocess's own pid, which never matches another command's
+                # detected harness pid when listen ran as a spawned child).
+                # Fall back to the older pid-only comparison for entries
+                # written before this field existed, or for a harness that
+                # runs `listen` as its own process rather than a subprocess.
+                match_pid = session.get("harnessPid")
+                if match_pid is None:
+                    match_pid = session.get("pid")
+                if match_pid == pid and session.get("alive", True):
                     return session.get("name") or f"{name}-{pid}"
         except Exception:
             pass

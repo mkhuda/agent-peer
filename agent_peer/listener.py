@@ -36,13 +36,19 @@ def _socket_address(identifier: str) -> str:
     return os.path.join(SOCKET_DIR, f"{identifier}.sock")
 
 class PeerListener:
-    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False):
+    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False, harness_pid: Optional[int] = None):
         self.name = name
         self.agent_type = agent_type or "AGENT"
         self.codex_thread_id = codex_thread_id
         self.force = force
         self.harness_uid = harness_session_uid()
         self.pid = os.getpid()
+        # The calling harness's own pid (e.g. agy, muse), when known - distinct
+        # from self.pid above, which is this listener subprocess's own pid.
+        # auto_session_name() matches new commands back to this session by
+        # comparing against harness_pid, since every other command from the
+        # same harness shares it but never shares this listener's own pid.
+        self.harness_pid = harness_pid
         self.cwd = cwd or os.getcwd()
         self.session_id = str(uuid.uuid4())
         self.peer_token = generate_peer_token()
@@ -131,6 +137,7 @@ class PeerListener:
         # 5. Write session json
         session_data = {
             "pid": self.pid,
+            "harnessPid": self.harness_pid,
             "sessionId": self.session_id,
             "cwd": self.cwd,
             "startedAt": now_ms,

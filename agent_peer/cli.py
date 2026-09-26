@@ -167,7 +167,8 @@ def cmd_listen(args):
         cwd=cwd,
         agent_type=(harness.upper() if harness else None),
         codex_thread_id=codex_thread_id,
-        force=args.force
+        force=args.force,
+        harness_pid=harness_pid
     )
     listener.run()
 

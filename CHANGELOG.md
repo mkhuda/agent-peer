@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.2
+
+- **Fixed:** a session that started `listen --name <foo>` as a subprocess of its harness
+  (agy, muse, pi, opencode) could still show up under an auto-generated
+  `<harness>-<pid>` name in `agent-peer thread`/`join`/`send`, instead of the name it
+  registered - `listen`'s own subprocess pid isn't the harness's own pid, so the two
+  never matched. Every command started from the same harness now reuses the name that
+  `listen` registered.
+
 ## 0.9.1
 
 - **Tab-completes `@mentions` in `agent-peer join`**: type `@` plus a few letters and press
