@@ -23,7 +23,7 @@ env/
 venv/
 ENV/
 .agent-peer/
-
+.env
 # Internal working notes - handwalk task tracking and process docs, not
 # meant for the published package or repo history going forward.
 docs/tasks/
