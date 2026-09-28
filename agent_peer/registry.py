@@ -5,6 +5,7 @@ import re
 from typing import List, Dict, Optional, Tuple
 
 from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
+from .codex_queue import queue_state
 
 _json_decoder = json.JSONDecoder()
 
@@ -52,6 +53,26 @@ def _apply_agy_live_status(sessions: List[Dict]) -> None:
         if s.get("status") == "new-msg":
             continue  # don't hide an unread message behind a busy/idle refresh
         s["status"] = live_status
+
+# Codex reports no turn state of its own, but it only takes a queued message
+# when a turn ends (a queued item waited 20 min behind one long tool call, live).
+# So an item that has sat unconsumed for a few seconds means Codex is mid-turn.
+# A working Codex with an empty queue still reads idle - this is a partial signal.
+_CODEX_BUSY_MIN_QUEUE_AGE_S = 10
+
+
+def _apply_codex_queue_status(sessions: List[Dict]) -> None:
+    import time
+
+    now = time.time()
+    for s in sessions:
+        if s.get("agentType") != "CODEX" or not s.get("alive") or not s.get("codexThreadId"):
+            continue
+        if s.get("status") == "new-msg":
+            continue
+        state = queue_state(s["codexThreadId"])
+        if state and state[0] >= 1 and state[1] and now - state[1] >= _CODEX_BUSY_MIN_QUEUE_AGE_S:
+            s["status"] = "busy"
 
 def get_session_agent_type(session_data: dict) -> str:
     """Determine if session is 'AGY' (Google Antigravity) or 'Claude' (Claude Code)."""
@@ -115,6 +136,7 @@ def get_active_sessions() -> List[Dict]:
         sessions.append(data)
 
     _apply_agy_live_status(sessions)
+    _apply_codex_queue_status(sessions)
 
     # Sort by name, then pid
     sessions.sort(key=lambda s: (s.get("name") or "", s.get("pid", 0)))

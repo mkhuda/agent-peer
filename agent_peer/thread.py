@@ -16,6 +16,7 @@ from .protocol import (
 )
 from .sender import send_message
 from .registry import get_active_sessions
+from .codex_queue import queue_state
 from . import compat
 
 # Total wall-time budget for one fanout across all concurrent workers.
@@ -27,6 +28,13 @@ from . import compat
 # room while still bounding a poster's worst-case delay to a few seconds
 # rather than hanging indefinitely on a genuinely dead/hung target.
 FANOUT_BUDGET_SECONDS = 3.0
+# Only a cap, not a fixed wait: the poster leaves as soon as its workers
+# finish. A `codex queue` is a separate process that must start and connect to
+# Codex's app-server; on a loaded machine that measured up to ~2.9s before the
+# request even arrived (server-side handling is tens of ms), so at 3s the poster
+# exited first and the successful delivery never reached the inbox log. Codex
+# targets get more headroom; native pushes keep the tight bound.
+FANOUT_CODEX_BUDGET_SECONDS = 6.0
 
 # Codex works through queued prompts one turn at a time, so N pushes cost N
 # turns: a follow-all Codex in a busy room piles up a queue that drains far
@@ -281,27 +289,9 @@ def _codex_sessions() -> Dict[str, Optional[str]]:
 
 def _codex_pending_count(codex_thread_id: Optional[str]) -> Optional[int]:
     """Items still waiting in this Codex session's native queue, or None when
-    it cannot be read. Codex offers no CLI for this, so it reads its queue
-    database read-only; the schema is Codex-internal, so any surprise (file
-    missing or renamed, locked, different columns) returns None and the
-    caller falls back to time-window-only behavior."""
-    if not codex_thread_id:
-        return None
-    try:
-        import glob
-        import sqlite3
-
-        dbs = sorted(glob.glob(os.path.join(os.path.expanduser("~"), ".codex", "queue_*.sqlite")))
-        if not dbs:
-            return None
-        con = sqlite3.connect(f"file:{dbs[-1]}?mode=ro", uri=True, timeout=0.3)
-        try:
-            row = con.execute("SELECT COUNT(*) FROM queued_items WHERE thread_id = ?", (codex_thread_id,)).fetchone()
-        finally:
-            con.close()
-        return int(row[0])
-    except Exception:
-        return None
+    it cannot be read (see codex_queue.queue_state)."""
+    state = queue_state(codex_thread_id)
+    return None if state is None else state[0]
 
 
 def _codex_preview(content: str, thread_id: str) -> str:
@@ -313,8 +303,17 @@ def _codex_preview(content: str, thread_id: str) -> str:
     )
 
 
+def _registered_names() -> Optional[set]:
+    """Names of every registered agent session, or None when unknown."""
+    try:
+        return {s.get("name") for s in get_active_sessions() if s.get("name")}
+    except Exception:
+        return None
+
+
 def _codex_push_decision(
-    thread_id: str, name: str, seq: int, content: str, codex_thread_id: Optional[str] = None
+    thread_id: str, name: str, seq: int, content: str, codex_thread_id: Optional[str] = None,
+    human: bool = False,
 ) -> Tuple[bool, str]:
     """Two brakes per (thread, Codex target). Depth: while Codex's own queue
     already holds an unconsumed item, further plain posts are held (Codex is
@@ -324,9 +323,12 @@ def _codex_push_decision(
     are counted, and the next push that goes out carries a "+N not pushed"
     note. The poster process exits right after posting, so no timer is left
     to flush a trailing push - a held message stays in the thread and counts
-    as unread for the participant's cursor. [stop] is never held. If the
-    queue depth is unreadable only the time window applies, and any failure
-    here fails open (push as before) and never raises into the poster."""
+    as unread for the participant's cursor. [stop] and any post from a human
+    (a sender that is not a registered agent session) are never held: the
+    brakes exist for agent-to-agent traffic, and a person's instruction must
+    not wait behind it. If the queue depth is unreadable only the time window
+    applies, and any failure here fails open (push as before) and never
+    raises into the poster."""
     try:
         now = time.time()
         path = get_thread_push_state_path(thread_id, name)
@@ -341,7 +343,7 @@ def _codex_push_decision(
         stop = "[stop]" in _strip_code_spans(content)
         mention = _mentions(content, name)
         hold = False
-        if not stop:
+        if not stop and not human:
             queued = _codex_pending_count(codex_thread_id)
             if queued is not None and queued >= (CODEX_QUEUE_MAX_MENTION if mention else 1):
                 hold = True
@@ -375,11 +377,14 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         if not targets:
             return
         codex_sessions = _codex_sessions()
+        registered = _registered_names()
+        human = registered is not None and sender not in registered
         workers = []
+        codex_workers = set()
         for name, pid in targets:
             body, note = content, ""
             if name in codex_sessions:
-                push, note = _codex_push_decision(thread_id, name, seq, content, codex_sessions[name])
+                push, note = _codex_push_decision(thread_id, name, seq, content, codex_sessions[name], human)
                 if not push:
                     continue
                 body = _codex_preview(content, thread_id)
@@ -395,11 +400,14 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
             worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender), daemon=True)
             worker.start()
             workers.append(worker)
-        deadline = time.time() + FANOUT_BUDGET_SECONDS
+            if name in codex_sessions:
+                codex_workers.add(worker)
+        started = time.time()
         for worker in workers:
-            remaining = deadline - time.time()
+            limit = FANOUT_CODEX_BUDGET_SECONDS if worker in codex_workers else FANOUT_BUDGET_SECONDS
+            remaining = started + limit - time.time()
             if remaining <= 0:
-                break
+                continue
             worker.join(timeout=remaining)
     except Exception:
         pass

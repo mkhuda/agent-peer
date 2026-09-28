@@ -468,6 +468,12 @@ class ThreadPushTest(unittest.TestCase):
                        "codexThreadId": "test-thread-uuid", "managedByAgentPeer": False}, fh)
         with open(os.path.join(sessions_dir, f"{proc.pid}.test.key"), "w", encoding="utf-8") as fh:
             json.dump({"peerToken": "t"}, fh)
+        # "bob" is a registered agent session; a sender with no session ("rg",
+        # a person on `join`) is treated as human and is never held.
+        bob = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (bob.terminate(), bob.wait(timeout=5)))
+        with open(os.path.join(sessions_dir, f"{bob.pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": "bob", "status": "idle", "managedByAgentPeer": False}, fh)
         path = os.path.join(self.home, ".agent-peer", "threads", f"{thread_id}.presence.json")
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as fh:
@@ -571,6 +577,18 @@ class ThreadPushTest(unittest.TestCase):
         self._post("t1", "bob", "[stop] everyone halt")
         self.assertEqual(len(calls()), 2, "[stop] is never held, whatever the depth")
 
+    def test_codex_never_holds_a_post_from_a_human(self):
+        # Live: a person's feedback sat behind agent-to-agent traffic while
+        # Codex was mid-turn. Humans (no registered session) skip both brakes.
+        calls = self._codex_follow_all_setup()
+        self._codex_queue_db(5)
+        self._post("t1", "rg", "plain feedback from a person")
+        self.assertEqual(len(calls()), 1, "a human's post must push even with a full queue")
+        self._post("t1", "rg", "another one inside the time window")
+        self.assertEqual(len(calls()), 2, "and must not be windowed either")
+        self._post("t1", "bob", "agent banter with the queue still full")
+        self.assertEqual(len(calls()), 2, "an agent's plain post is still held")
+
     def test_codex_unreadable_queue_falls_back_to_the_time_window(self):
         calls = self._codex_follow_all_setup()
         os.makedirs(os.path.join(self.home, ".codex"), exist_ok=True)
@@ -579,6 +597,40 @@ class ThreadPushTest(unittest.TestCase):
         self._post("t1", "bob", "first")
         self._post("t1", "bob", "second inside the window")
         self.assertEqual(len(calls()), 1)
+
+    def test_codex_queue_slower_than_the_native_budget_is_still_logged(self):
+        # Live: a loaded machine took ~2.9s just to get `codex queue` connected,
+        # the poster exited at 3s, and the (successful) delivery was never
+        # written to the inbox log. Codex targets get a longer cap.
+        from unittest import mock
+
+        bin_dir = tempfile.mkdtemp(prefix="slow-codex-bin-")
+        self.addCleanup(shutil.rmtree, bin_dir, True)
+        with open(os.path.join(bin_dir, "codex"), "w", encoding="utf-8") as fh:
+            fh.write("#!/bin/sh\nsleep 4\necho '{}'\n")
+        os.chmod(os.path.join(bin_dir, "codex"), 0o755)
+        sessions_dir = os.path.join(self.home, ".claude", "sessions")
+        os.makedirs(sessions_dir, exist_ok=True)
+        proc = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (proc.terminate(), proc.wait(timeout=5)))
+        with open(os.path.join(sessions_dir, f"{proc.pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": "codex-slow", "status": "idle", "agentType": "CODEX",
+                       "codexThreadId": "tid", "managedByAgentPeer": False}, fh)
+        with open(os.path.join(sessions_dir, f"{proc.pid}.test.key"), "w", encoding="utf-8") as fh:
+            json.dump({"peerToken": "t"}, fh)
+        path = os.path.join(self.home, ".agent-peer", "threads", "t1.presence.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"codex-slow": {"pid": 999999, "last_seen": time.time(), "left": True}}, fh)
+
+        with mock.patch.dict(os.environ, {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", "")}):
+            t0 = time.time()
+            self._post("t1", "bob", "@codex-slow urgent")
+            elapsed = time.time() - t0
+        log = os.path.join(self.home, ".agent-peer", "inboxes", "codex-slow.jsonl")
+        self.assertTrue(os.path.exists(log) and "@codex-slow urgent" in open(log).read(),
+                        f"a 4s codex queue must still be logged (post took {elapsed:.1f}s)")
+        self.assertLess(elapsed, 6.5, "the longer cap must stay a cap, not an unbounded wait")
 
     def test_busy_active_silent_left_knock_rings(self):
         # Busy no longer gates anything for actives (they are poll-only);
