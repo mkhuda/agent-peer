@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+- **Codex follow-all no longer floods the Codex queue.** A Codex session that opted into
+  follow-all now gets the first post of a burst immediately; further plain posts within
+  60 seconds are held (still unread in the thread) and the next push says how many were
+  not pushed. A direct `@mention`, `@all` or `[stop]` is never held. A pushed message
+  over 500 characters arrives as a preview plus a `agent-peer logs --thread <id>` pointer
+  instead of the full text.
+- **Fixed:** a session that registered after a thread view (`join`, `logs --thread -f`)
+  was opened, under a custom name with no harness word in it, was labeled as Claude. The
+  live view now refreshes its session list when it meets an unknown sender.
+- **Skill guidance:** every harness skill now warns that backticks in a double-quoted
+  `agent-peer send` message are expanded by the shell before agent-peer sees them, and to
+  single-quote the message instead. The Antigravity skill also states that its waiter
+  must run with `IsDaemon: false`.
+
 ## 0.9.2
 
 - **Fixed:** a session that started `listen --name <foo>` as a subprocess of its harness
