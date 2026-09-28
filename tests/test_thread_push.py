@@ -447,7 +447,7 @@ class ThreadPushTest(unittest.TestCase):
             proc.wait(timeout=5)
             shutil.rmtree(bin_dir, ignore_errors=True)
 
-    def _codex_follow_all_setup(self, thread_id="t1"):
+    def _codex_follow_all_setup(self, thread_id="t1", listener_alive=True, started_hours_ago=0):
         """A follow-all Codex target whose `codex queue` is a fake that logs
         one line per call - lets a test count real pushes end to end."""
         from unittest import mock
@@ -463,10 +463,13 @@ class ThreadPushTest(unittest.TestCase):
         os.makedirs(sessions_dir, exist_ok=True)
         proc = subprocess.Popen(["sleep", "60"])
         self.addCleanup(lambda: (proc.terminate(), proc.wait(timeout=5)))
-        with open(os.path.join(sessions_dir, f"{proc.pid}.json"), "w", encoding="utf-8") as fh:
+        # A dead listener keeps its registry file (a killed process cannot clean up).
+        listener_pid = proc.pid if listener_alive else 999999
+        with open(os.path.join(sessions_dir, f"{listener_pid}.json"), "w", encoding="utf-8") as fh:
             json.dump({"name": "codex-fake", "status": "idle", "agentType": "CODEX",
-                       "codexThreadId": "test-thread-uuid", "managedByAgentPeer": False}, fh)
-        with open(os.path.join(sessions_dir, f"{proc.pid}.test.key"), "w", encoding="utf-8") as fh:
+                       "codexThreadId": "test-thread-uuid", "managedByAgentPeer": False,
+                       "startedAt": int((time.time() - started_hours_ago * 3600) * 1000)}, fh)
+        with open(os.path.join(sessions_dir, f"{listener_pid}.test.key"), "w", encoding="utf-8") as fh:
             json.dump({"peerToken": "t"}, fh)
         # "bob" is a registered agent session; a sender with no session ("rg",
         # a person on `join`) is treated as human and is never held.
@@ -589,6 +592,19 @@ class ThreadPushTest(unittest.TestCase):
         self._post("t1", "bob", "agent banter with the queue still full")
         self.assertEqual(len(calls()), 2, "an agent's plain post is still held")
 
+    def test_codex_push_is_still_delivered_when_its_listener_died(self):
+        # Live: a Codex update restarted its app-server and killed `listen`;
+        # every push then failed silently with "Session not found" although the
+        # conversation and its native queue were fine.
+        calls = self._codex_follow_all_setup(listener_alive=False)
+        self._post("t1", "bob", "@codex-fake are you there")
+        self.assertEqual(len(calls()), 1)
+
+    def test_codex_registration_older_than_three_days_is_not_queued_to(self):
+        calls = self._codex_follow_all_setup(listener_alive=False, started_hours_ago=100)
+        self._post("t1", "bob", "@codex-fake are you there")
+        self.assertEqual(len(calls()), 0)
+
     def test_codex_unreadable_queue_falls_back_to_the_time_window(self):
         calls = self._codex_follow_all_setup()
         os.makedirs(os.path.join(self.home, ".codex"), exist_ok=True)
@@ -694,6 +710,40 @@ class AutoNameFixOneTest(unittest.TestCase):
             data["harnessPid"] = harness_pid
         with open(os.path.join(self._tmp.name, f"{pid}.json"), "w", encoding="utf-8") as fh:
             json.dump(data, fh)
+
+    def _register_codex(self, pid, name, thread_id, started_at=1):
+        with open(os.path.join(self._tmp.name, f"{pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": name, "agentType": "CODEX", "codexThreadId": thread_id, "startedAt": started_at}, fh)
+
+    def test_codex_conversation_id_keeps_the_name_after_the_listener_died(self):
+        # Live: a Codex update changed the hosting pid and killed `listen`, so a
+        # post fell back to `codex-<newpid>` until `listen` was re-run.
+        from unittest import mock
+
+        self._register_codex(999997, "super-ui", "conv-1")  # dead listener
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("codex", 55555)
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "conv-1"}):
+            self.assertEqual(self.protocol.auto_session_name(), "super-ui")
+
+    def test_codex_conversation_id_prefers_a_live_registration_over_a_dead_one(self):
+        from unittest import mock
+
+        self._register_codex(999997, "old-name", "conv-1", started_at=999999999999)
+        self._register_codex(os.getpid(), "live-name", "conv-1", started_at=1)
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("codex", 55555)
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "conv-1"}):
+            self.assertEqual(self.protocol.auto_session_name(), "live-name")
+
+    def test_codex_conversation_id_unknown_or_unset_falls_back_to_pid_naming(self):
+        from unittest import mock
+
+        self._register_codex(999997, "super-ui", "conv-1")
+        self.protocol.detect_harness_identity = lambda max_depth=6: ("codex", 55555)
+        with mock.patch.dict(os.environ, {"CODEX_THREAD_ID": "some-other-conversation"}):
+            self.assertEqual(self.protocol.auto_session_name(), "codex-55555")
+        env = {k: v for k, v in os.environ.items() if k != "CODEX_THREAD_ID"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(self.protocol.auto_session_name(), "codex-55555")
 
     def test_registered_live_pid_returns_official_name(self):
         self._register(os.getpid(), "agent-peer-e4")

@@ -1,7 +1,7 @@
 import shutil
 import subprocess
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 from .registry import resolve_session
 from .protocol import format_auth_frame, format_user_frame
@@ -74,6 +74,34 @@ def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name
         "message": content
     }
 
+# A Codex update or restart kills the background `agent-peer listen`, but the
+# conversation (and its native queue) lives on and `codex queue` needs only its
+# thread id. Recent registrations are still reachable; older ones are treated
+# as gone so a long-finished session is not queued to forever.
+_DEAD_CODEX_MAX_AGE_S = 72 * 3600
+
+
+def _dead_codex_session(target: str) -> Optional[Dict[str, Any]]:
+    from .registry import get_active_sessions
+
+    lower = target.lower().strip()
+    now = time.time()
+    sessions = get_active_sessions()
+
+    def _named(s):
+        return (s.get("name") or "").lower().strip() == lower or str(s.get("pid")) == target
+
+    if any(s.get("alive") and _named(s) for s in sessions):
+        return None  # a live session owns this name; the original error stands
+    candidates = [
+        s for s in sessions
+        if not s.get("alive") and _named(s)
+        and s.get("agentType") == "CODEX" and s.get("codexThreadId")
+        and now - float(s.get("startedAt") or 0) / 1000.0 <= _DEAD_CODEX_MAX_AGE_S
+    ]
+    return max(candidates, key=lambda s: float(s.get("startedAt") or 0)) if candidates else None
+
+
 def send_message(
     target: str,
     content: str,
@@ -84,7 +112,15 @@ def send_message(
     """
     Send real-time peer message to target session.
     """
-    session, sock_path, peer_token = resolve_session(target)
+    try:
+        session, sock_path, peer_token = resolve_session(target)
+    except ValueError:
+        session = _dead_codex_session(target)
+        if session is None:
+            raise
+        return _send_via_codex_queue(
+            session, session["codexThreadId"], content, from_name, _resolve_sender_cwd(from_name), priority
+        )
     from_cwd = _resolve_sender_cwd(from_name)
 
     codex_thread_id = session.get("codexThreadId")

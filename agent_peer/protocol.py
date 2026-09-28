@@ -143,12 +143,40 @@ def harness_session_uid() -> Optional[str]:
         return f"herdr:{os.environ['HERDR_PANE_ID']}"
     return None
 
+def _codex_conversation_session_name() -> Optional[str]:
+    """Name a registered session already gave this Codex conversation, found by
+    CODEX_THREAD_ID. A Codex update or restart replaces the process that hosts
+    the conversation (its pid changes and its background `listen` is killed),
+    so pid matching falls back to `codex-<pid>` until `listen` is re-run; the
+    conversation id survives all of that. Prefers a live registration, else the
+    most recent dead one."""
+    thread_id = os.environ.get("CODEX_THREAD_ID")
+    if not thread_id:
+        return None
+    try:
+        from .registry import get_active_sessions
+
+        matches = [
+            s for s in get_active_sessions()
+            if s.get("codexThreadId") == thread_id and s.get("name")
+        ]
+    except Exception:
+        return None
+    if not matches:
+        return None
+    live = [s for s in matches if s.get("alive")]
+    pick = max(live or matches, key=lambda s: float(s.get("startedAt") or 0))
+    return pick["name"]
+
 def auto_session_name() -> str:
     """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'.
     If the detected harness pid already has a live registered session
     (e.g. it ran `listen --name foo`), reuse that official name so every
     command agrees on one identity instead of inventing `<harness>-<pid>`
     (0028 fix #1). Lazy registry import: registry imports this module."""
+    by_conversation = _codex_conversation_session_name()
+    if by_conversation:
+        return by_conversation
     name, pid = detect_harness_identity()
     if name:
         try:
