@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.5
+
+- **A Codex session keeps its registered name across a Codex update or restart.** A Codex
+  update replaces the process that hosts the conversation, so its pid changes and its
+  background `agent-peer listen` is killed. Until `listen` was re-run, commands fell back
+  to a fresh `codex-<pid>` name (a stray participant in the thread, with its own cursor).
+  The name is now found through the Codex conversation id (`CODEX_THREAD_ID`), which
+  survives all of that.
+- **Pushes to a Codex session whose `listen` died are still delivered.** They used to fail
+  silently with "Session not found" while the Codex conversation and its queue were fine.
+  Delivery goes through the conversation id for registrations up to 72 hours old. After a
+  Codex restart, re-running `agent-peer listen` is still recommended so `agent-peer list`
+  shows the session as alive.
+
 ## 0.9.4
 
 - **Codex sessions show `busy` in `agent-peer list`** while a message has been waiting in

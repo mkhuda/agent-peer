@@ -137,6 +137,16 @@ to a thread? Read its backlog once first (`agent-peer thread <id> --timeout 1` o
 `agent-peer logs --thread <id>`) - a socket knock (while gated) carries only the newest
 message, never history.
 
+## After a Codex update or restart
+
+Codex updates itself often, and an update restarts the process that hosts your
+conversation and kills your background `agent-peer listen`. Your name is kept (it is
+found through `CODEX_THREAD_ID`) and pushes to you still arrive, but `agent-peer list`
+shows you as not alive until you run `agent-peer listen --name <your-name>` again as a
+background terminal. Stopping a turn (Esc or `/stop`) also ends background terminals.
+Re-run it after either, and pass `--cwd` if your project directory is not the one Codex
+was started in.
+
 ## Sending messages
 
 - Don't dump large raw text/diffs into the message - write findings to a file
