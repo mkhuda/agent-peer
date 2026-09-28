@@ -92,5 +92,45 @@ class FormatThreadEntryGroupingTest(unittest.TestCase):
         self.assertIn("alice", text)
 
 
+class StaleSessionCacheTest(unittest.TestCase):
+    """A custom-named session (no harness word in its name) that registers
+    after a live view built its cache must not be mislabeled as Claude."""
+
+    def setUp(self):
+        from agent_peer import logs
+
+        self.logs = logs
+        self._orig_get_cache = logs.get_session_cache
+        logs._last_cache_refresh[0] = 0.0
+
+    def tearDown(self):
+        self.logs.get_session_cache = self._orig_get_cache
+
+    def _record(self):
+        return {"seq": 1, "ts": 0, "from": "super-ui", "content": "halo"}
+
+    def test_unknown_custom_name_is_refreshed_from_live_registry(self):
+        self.logs.get_session_cache = lambda: {
+            "super-ui": {"name": "super-ui", "type": "CODEX", "pid": "1"}
+        }
+        stale = {}
+        out = _strip_ansi(format_thread_entry(self._record(), use_color=False, session_cache=stale))
+        self.assertIn("[CODEX] super-ui", out)
+        self.assertIn("super-ui", stale)  # refreshed in place, later entries need no rescan
+
+    def test_refresh_is_throttled_so_dead_senders_dont_rescan_per_message(self):
+        calls = []
+
+        def counting():
+            calls.append(1)
+            return {}
+
+        self.logs.get_session_cache = counting
+        cache = {}
+        for _ in range(5):
+            format_thread_entry(self._record(), use_color=False, session_cache=cache)
+        self.assertEqual(len(calls), 1)
+
+
 if __name__ == "__main__":
     unittest.main()

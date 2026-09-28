@@ -110,6 +110,26 @@ def get_session_cache() -> Dict[str, Dict[str, str]]:
         pass
     return cache
 
+_CACHE_REFRESH_MIN_INTERVAL_S = 2.0
+_last_cache_refresh = [0.0]
+
+
+def refresh_cache_if_unknown(name: str, cache: Dict[str, Dict[str, str]]) -> None:
+    """A session that registered after a live view opened (join / --follow)
+    isn't in its once-built cache, and a custom name like 'super-ui' has no
+    harness pattern to fall back on - it would mislabel as Claude. Refresh
+    in place on a miss, throttled so a backlog of dead senders can't cause a
+    registry scan per message."""
+    clean = (name or "").lower().strip()
+    if not clean or clean in cache:
+        return
+    now = time.monotonic()
+    if now - _last_cache_refresh[0] < _CACHE_REFRESH_MIN_INTERVAL_S:
+        return
+    _last_cache_refresh[0] = now
+    cache.update(get_session_cache())
+
+
 def resolve_agent_type(name: str, cache: Dict[str, Dict[str, str]]) -> str:
     """Infer a session's harness type: cache lookup first (exact name, then
     a bare pid embedded in the name), then a name-pattern fallback covering
@@ -474,6 +494,8 @@ def format_thread_entry(
     time_str = time.strftime("%H:%M:%S", time.localtime(record.get("ts", 0)))
     sender = record.get("from", "unknown")
     content = record.get("content", "")
+    if session_cache is not None:
+        refresh_cache_if_unknown(sender, session_cache)
     urgency_tag = _thread_urgency_tag(content, use_color)
     is_viewer = viewer is not None and sender == viewer
     body = "\n".join(f"  {line}" for line in content.splitlines())
