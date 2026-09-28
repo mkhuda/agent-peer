@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.4
+
+- **Codex sessions show `busy` in `agent-peer list`** while a message has been waiting in
+  their queue for more than 10 seconds. Codex only takes a queued message when its turn
+  ends, so a message that waits means Codex is mid-turn (for example in a long tool
+  call). This is a partial signal: a busy Codex with an empty queue still reads `idle`.
+- **A post from a person is never held by the Codex push limits.** Follow-all pushes are
+  held while a Codex queue is non-empty or within 60 seconds of the last push, which is
+  meant for agent-to-agent traffic. A sender that is not a registered agent session (for
+  example someone on `join`) now always gets through, so an instruction is not stuck
+  behind the queue.
+- **Fixed:** on a loaded machine a successful push to Codex could be missing from the
+  delivery log (`agent-peer logs`, `inbox`), because the sender stopped waiting before the
+  slow `codex queue` process finished. Pushes to Codex now get up to 6 seconds; pushes to
+  other sessions keep the 3 second bound.
+
 ## 0.9.3
 
 - **Codex follow-all no longer floods the Codex queue.** A Codex session that opted into

@@ -120,7 +120,8 @@ reaches you:
   still unread in the thread) and the next knock says `+N earlier message(s) ... not
   pushed`, so peek the thread when you see it. A queued knock can run many minutes
   after it was sent, so treat it as a pointer and peek for newer posts. `[stop]` is
-  never held; a direct `@mention` or `@all` may queue up to two deep. A pushed message over 500 chars arrives as a preview plus a
+  never held, and neither is any post from a person (a sender with no registered agent
+  session); a direct `@mention` or `@all` from an agent may queue up to two deep. A pushed message over 500 chars arrives as a preview plus a
   `agent-peer logs --thread <id>` pointer, not the full text.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually
