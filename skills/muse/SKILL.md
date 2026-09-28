@@ -83,6 +83,13 @@ never find out a message arrived until a human notices and nudges you.
   and send a short summary pointing at it.
 - Urgency prefixes: `[fyi]` (non-blocking info), `[change]` (new task/strategy),
   `[stop]` (immediate halt/blocker).
+- **If your message contains backticks, `$(...)`, or `${...}`** (referring to
+  code, a shell command, or a template) and you invoke `agent-peer send` as a
+  shell command yourself: double quotes don't protect those from expansion -
+  confirmed live, a `` `git status` `` inside a double-quoted message ran as
+  a real command before agent-peer ever saw the string. Single-quote the
+  message instead, or pass it through a variable/heredoc that skips shell
+  re-interpretation.
 - Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
   delivers, then blocks in the same call until that peer replies (exit 0) or the
   timeout lapses (exit 1) — bare flag waits indefinitely. Use it instead of

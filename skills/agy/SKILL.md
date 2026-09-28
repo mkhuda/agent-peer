@@ -19,7 +19,8 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 <CRITICAL_INVARIANT>
 STANDBY DISCIPLINE FOR NON-NATIVE HARNESSES:
 Non-native harnesses (Antigravity, Muse, Pi, OpenCode) have no native background push.
-- When waiting on peer handoffs or participating in collaborative tasks, keep a background waiter active (`agent-peer wait` or `agent-peer thread <id>`, WaitMsBeforeAsync: 500).
+- When waiting on peer handoffs or participating in collaborative tasks, keep a background waiter active (`agent-peer wait` or `agent-peer thread <id>`, `run_command` with `IsDaemon: false` and `WaitMsBeforeAsync: 500`).
+- **`IsDaemon` must be `false`, never `true`, for this waiter.** `IsDaemon: true` tells Antigravity this is a persistent service (a dev server that's meant to run forever), which never fires the task-completion wakeup you rely on. `agent-peer wait`/`thread` are one-shot blocking calls that exit the instant a message arrives - the wakeup only happens when `run_command` sees that process actually exit, which `IsDaemon: true` prevents from ever mattering.
 - Model-wake semantics are host-specific: verify wake behavior per host runtime.
 </CRITICAL_INVARIANT>
 
@@ -35,6 +36,7 @@ Before finalizing any response during multi-agent collaboration:
 | *"I will run `agent-peer wait` when the user asks me to."* | If you don't launch it when waiting for peers, no peer message can wake you to receive that prompt. |
 | *"My task is purely local coding, I don't need agent-peer."* | In a collaborative workspace, the foreman or reviewers can issue `[change]` or `[stop]` directives at any moment. |
 | *"I already launched `listen` earlier, that's enough."* | `listen` registers presence on disk. `wait` is what suspends and awakens your process. Both work together. |
+| *"I set `IsDaemon: true` so the waiter keeps running in the background."* | Wrong flag for this. `IsDaemon: true` marks it a persistent service and suppresses the task-completion wakeup entirely - use `IsDaemon: false` so your process waking up when the waiter exits is what actually re-arms you. |
 
 ---
 
@@ -83,7 +85,14 @@ When a task involves peer collaboration:
    - `[fyi]`: Information, review links, completed tasks (non-blocking).
    - `[change]`: Directing a new task or changing strategy.
    - `[stop]`: Immediate halt / blocker / out-of-bounds alert.
-5. Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
+5. **If your message contains backticks, `$(...)`, or `${...}`** (referring to
+   code, a shell command, or a template) and you run `agent-peer send` yourself
+   as a shell command: double quotes don't protect those from expansion -
+   confirmed live, a `` `git status` `` inside a double-quoted message ran as
+   a real command before agent-peer ever saw the string, silently swallowing
+   the backticked text. Single-quote the message instead (`'...'`), or pass it
+   through a variable/heredoc that skips shell re-interpretation.
+6. Waiting for a specific reply: `agent-peer send <peer> "msg" --await-reply [SECONDS]`
    (as a background `run_command` task, like `wait`) delivers, then that same call exits 0
    the moment that peer replies — or exit 1 on timeout, bare flag waits indefinitely. Use it
    instead of send-then-`wait` when you need the answer before proceeding; it closes the race
