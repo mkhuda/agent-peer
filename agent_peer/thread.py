@@ -35,6 +35,12 @@ FANOUT_BUDGET_SECONDS = 3.0
 # not. Applies only to Codex targets - Claude's native push is unchanged.
 CODEX_PUSH_MAX_CHARS = 500
 CODEX_PUSH_WINDOW_SECONDS = 60.0
+# A time window alone cannot stop the pile-up: while Codex sits in one long
+# tool call it consumes nothing, so every elapsed window still adds an item.
+# Backpressure has to follow consumption, which only Codex's own queue knows
+# (read-only, fail-open). Plain follow-all posts wait for an empty queue; a
+# mention may queue up to this depth; [stop] is never held.
+CODEX_QUEUE_MAX_MENTION = 2
 
 
 def _secure(path: str):
@@ -261,15 +267,41 @@ def _push_one(name: str, pid: int, frame: str, sender: str):
             continue  # a dead/unreachable target must never fail the poster
 
 
-def _codex_session_names() -> set:
+def _codex_sessions() -> Dict[str, Optional[str]]:
+    """Live Codex session name -> its native queue thread id (may be None)."""
     try:
         return {
-            s.get("name")
+            s.get("name"): s.get("codexThreadId")
             for s in get_active_sessions()
             if str(s.get("agentType") or "").upper() == "CODEX" and s.get("name")
         }
     except Exception:
-        return set()
+        return {}
+
+
+def _codex_pending_count(codex_thread_id: Optional[str]) -> Optional[int]:
+    """Items still waiting in this Codex session's native queue, or None when
+    it cannot be read. Codex offers no CLI for this, so it reads its queue
+    database read-only; the schema is Codex-internal, so any surprise (file
+    missing or renamed, locked, different columns) returns None and the
+    caller falls back to time-window-only behavior."""
+    if not codex_thread_id:
+        return None
+    try:
+        import glob
+        import sqlite3
+
+        dbs = sorted(glob.glob(os.path.join(os.path.expanduser("~"), ".codex", "queue_*.sqlite")))
+        if not dbs:
+            return None
+        con = sqlite3.connect(f"file:{dbs[-1]}?mode=ro", uri=True, timeout=0.3)
+        try:
+            row = con.execute("SELECT COUNT(*) FROM queued_items WHERE thread_id = ?", (codex_thread_id,)).fetchone()
+        finally:
+            con.close()
+        return int(row[0])
+    except Exception:
+        return None
 
 
 def _codex_preview(content: str, thread_id: str) -> str:
@@ -281,15 +313,20 @@ def _codex_preview(content: str, thread_id: str) -> str:
     )
 
 
-def _codex_push_decision(thread_id: str, name: str, seq: int, content: str) -> Tuple[bool, str]:
-    """Leading-edge window per (thread, Codex target): the first push of a
-    burst goes out and wakes Codex; the rest inside the window are counted,
-    not sent, and the next push carries a "+N not pushed" note. The poster
-    process exits right after posting, so there is no timer left to flush a
-    trailing push - a suppressed message stays in the thread and counts as
-    unread for the participant's cursor, so the next peek picks it up.
-    A mention/@all/[stop] is never held back. Any failure here fails open
-    (push as before) and never raises into the poster."""
+def _codex_push_decision(
+    thread_id: str, name: str, seq: int, content: str, codex_thread_id: Optional[str] = None
+) -> Tuple[bool, str]:
+    """Two brakes per (thread, Codex target). Depth: while Codex's own queue
+    already holds an unconsumed item, further plain posts are held (Codex is
+    guaranteed to run again, and its next peek sees everything still unread);
+    a mention may queue up to CODEX_QUEUE_MAX_MENTION. Time: a plain post is
+    also held inside CODEX_PUSH_WINDOW_SECONDS of the last push. Held posts
+    are counted, and the next push that goes out carries a "+N not pushed"
+    note. The poster process exits right after posting, so no timer is left
+    to flush a trailing push - a held message stays in the thread and counts
+    as unread for the participant's cursor. [stop] is never held. If the
+    queue depth is unreadable only the time window applies, and any failure
+    here fails open (push as before) and never raises into the poster."""
     try:
         now = time.time()
         path = get_thread_push_state_path(thread_id, name)
@@ -301,7 +338,16 @@ def _codex_push_decision(thread_id: str, name: str, seq: int, content: str) -> T
         last = float(state.get("last_push_ts", 0) or 0)
         pending = int(state.get("suppressed", 0) or 0)
         first = int(state.get("first_suppressed_seq", 0) or 0)
-        if not _mentions(content, name) and now - last < CODEX_PUSH_WINDOW_SECONDS:
+        stop = "[stop]" in _strip_code_spans(content)
+        mention = _mentions(content, name)
+        hold = False
+        if not stop:
+            queued = _codex_pending_count(codex_thread_id)
+            if queued is not None and queued >= (CODEX_QUEUE_MAX_MENTION if mention else 1):
+                hold = True
+            elif not mention and now - last < CODEX_PUSH_WINDOW_SECONDS:
+                hold = True
+        if hold:
             atomic_write_json(path, {
                 "last_push_ts": last,
                 "suppressed": pending + 1,
@@ -328,15 +374,19 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         targets = fanout_targets(thread_id, sender, content)
         if not targets:
             return
-        codex_names = _codex_session_names()
+        codex_sessions = _codex_sessions()
         workers = []
         for name, pid in targets:
             body, note = content, ""
-            if name in codex_names:
-                push, note = _codex_push_decision(thread_id, name, seq, content)
+            if name in codex_sessions:
+                push, note = _codex_push_decision(thread_id, name, seq, content, codex_sessions[name])
                 if not push:
                     continue
                 body = _codex_preview(content, thread_id)
+                # A queued frame can run many minutes after it was sent.
+                note = (note + "\n" if note else "") + (
+                    f"(This may be stale - newer posts may be waiting: agent-peer thread {thread_id} --timeout 10)"
+                )
             frame = (
                 f"[thread: {thread_id} #{seq} from {sender}]: {body}\n"
                 + (f"{note}\n" if note else "")

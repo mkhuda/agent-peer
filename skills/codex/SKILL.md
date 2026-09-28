@@ -115,10 +115,12 @@ reaches you:
   choice for genuinely following a live discussion, not the default - peek & post +
   mention-knock remains the recommendation unless you deliberately want everything.
   To keep that queue from piling up, follow-all pushes are windowed: the first post of a
-  burst knocks immediately, further plain posts within 60s are held (not lost - they are
+  burst knocks immediately, further plain posts are held while you still have an
+  unconsumed item in your queue or within 60s of the last knock (not lost - they are
   still unread in the thread) and the next knock says `+N earlier message(s) ... not
-  pushed`, so peek the thread when you see it. Direct `@mention`, `@all` and `[stop]`
-  are never held. A pushed message over 500 chars arrives as a preview plus a
+  pushed`, so peek the thread when you see it. A queued knock can run many minutes
+  after it was sent, so treat it as a pointer and peek for newer posts. `[stop]` is
+  never held; a direct `@mention` or `@all` may queue up to two deep. A pushed message over 500 chars arrives as a preview plus a
   `agent-peer logs --thread <id>` pointer, not the full text.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually

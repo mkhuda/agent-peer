@@ -523,6 +523,63 @@ class ThreadPushTest(unittest.TestCase):
         self.assertIn("agent-peer logs --thread t1", sent[0])
         self.assertLess(len(sent[0]), 1200)
 
+    def _codex_queue_db(self, pending):
+        """Stand-in for Codex's own queue database with `pending` unconsumed
+        items for the fake session's thread id."""
+        import sqlite3
+
+        d = os.path.join(self.home, ".codex")
+        os.makedirs(d, exist_ok=True)
+        con = sqlite3.connect(os.path.join(d, "queue_1.sqlite"))
+        con.execute(
+            "CREATE TABLE IF NOT EXISTS queued_items (id TEXT PRIMARY KEY, thread_id TEXT NOT NULL, "
+            "payload_json TEXT NOT NULL, queue_order INTEGER NOT NULL, created_at_ms INTEGER NOT NULL, "
+            "updated_at_ms INTEGER NOT NULL)"
+        )
+        con.execute("DELETE FROM queued_items")
+        for i in range(pending):
+            con.execute(
+                "INSERT INTO queued_items VALUES (?, 'test-thread-uuid', '{}', ?, 0, 0)", (f"item-{i}", i)
+            )
+        con.commit()
+        con.close()
+
+    def test_codex_plain_post_is_held_while_its_queue_is_not_empty(self):
+        # The live failure: Codex stuck in one long tool call consumes nothing,
+        # so a time window alone still adds an item per window.
+        calls = self._codex_follow_all_setup()
+        self._codex_queue_db(1)
+        self._post("t1", "bob", "banter while codex is busy")
+        self.assertEqual(len(calls()), 0)
+
+        self._codex_queue_db(0)  # Codex caught up
+        self._post("t1", "bob", "banter after it drained")
+        after = calls()
+        self.assertEqual(len(after), 1)
+        self.assertIn("+1 earlier message(s)", after[0])
+        self.assertIn("may be stale", after[0])
+
+    def test_codex_mention_queues_up_to_depth_two_and_stop_is_never_held(self):
+        calls = self._codex_follow_all_setup()
+        self._codex_queue_db(1)
+        self._post("t1", "bob", "@codex-fake first ask")
+        self.assertEqual(len(calls()), 1, "a mention may queue behind one pending item")
+        self._codex_queue_db(2)
+        self._post("t1", "bob", "@codex-fake second ask")
+        self.assertEqual(len(calls()), 1, "two pending items already guarantee Codex runs again")
+        self._codex_queue_db(5)
+        self._post("t1", "bob", "[stop] everyone halt")
+        self.assertEqual(len(calls()), 2, "[stop] is never held, whatever the depth")
+
+    def test_codex_unreadable_queue_falls_back_to_the_time_window(self):
+        calls = self._codex_follow_all_setup()
+        os.makedirs(os.path.join(self.home, ".codex"), exist_ok=True)
+        with open(os.path.join(self.home, ".codex", "queue_1.sqlite"), "wb") as fh:
+            fh.write(b"not a sqlite database")
+        self._post("t1", "bob", "first")
+        self._post("t1", "bob", "second inside the window")
+        self.assertEqual(len(calls()), 1)
+
     def test_busy_active_silent_left_knock_rings(self):
         # Busy no longer gates anything for actives (they are poll-only);
         # the knock path is left + mention, regardless of busy status.

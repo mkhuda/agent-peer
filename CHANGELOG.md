@@ -3,9 +3,11 @@
 ## Unreleased
 
 - **Codex follow-all no longer floods the Codex queue.** A Codex session that opted into
-  follow-all now gets the first post of a burst immediately; further plain posts within
-  60 seconds are held (still unread in the thread) and the next push says how many were
-  not pushed. A direct `@mention`, `@all` or `[stop]` is never held. A pushed message
+  follow-all now gets the first post of a burst immediately; further plain posts are held
+  while Codex still has an unconsumed item in its own queue (for example during a long
+  tool call) or within 60 seconds of the last push. Held posts stay unread in the thread
+  and the next push says how many were not pushed. `[stop]` is never held; a direct
+  `@mention` or `@all` may queue up to two deep. A pushed message
   over 500 characters arrives as a preview plus a `agent-peer logs --thread <id>` pointer
   instead of the full text.
 - **Fixed:** a session that registered after a thread view (`join`, `logs --thread -f`)
