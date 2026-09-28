@@ -10,6 +10,8 @@ from .protocol import (
     get_thread_cursor_path,
     get_thread_presence_path,
     get_thread_lock_path,
+    get_thread_push_state_path,
+    atomic_write_json,
     ensure_dirs,
 )
 from .sender import send_message
@@ -25,6 +27,14 @@ from . import compat
 # room while still bounding a poster's worst-case delay to a few seconds
 # rather than hanging indefinitely on a genuinely dead/hung target.
 FANOUT_BUDGET_SECONDS = 3.0
+
+# Codex works through queued prompts one turn at a time, so N pushes cost N
+# turns: a follow-all Codex in a busy room piles up a queue that drains far
+# slower than the room talks, and every late item is already stale. Cutting
+# the NUMBER of queued items is what fixes that; shortening text alone would
+# not. Applies only to Codex targets - Claude's native push is unchanged.
+CODEX_PUSH_MAX_CHARS = 500
+CODEX_PUSH_WINDOW_SECONDS = 60.0
 
 
 def _secure(path: str):
@@ -251,6 +261,65 @@ def _push_one(name: str, pid: int, frame: str, sender: str):
             continue  # a dead/unreachable target must never fail the poster
 
 
+def _codex_session_names() -> set:
+    try:
+        return {
+            s.get("name")
+            for s in get_active_sessions()
+            if str(s.get("agentType") or "").upper() == "CODEX" and s.get("name")
+        }
+    except Exception:
+        return set()
+
+
+def _codex_preview(content: str, thread_id: str) -> str:
+    if len(content) <= CODEX_PUSH_MAX_CHARS:
+        return content
+    return (
+        content[:CODEX_PUSH_MAX_CHARS].rstrip()
+        + f"... [truncated, {len(content)} chars - full text: agent-peer logs --thread {thread_id} -n 10]"
+    )
+
+
+def _codex_push_decision(thread_id: str, name: str, seq: int, content: str) -> Tuple[bool, str]:
+    """Leading-edge window per (thread, Codex target): the first push of a
+    burst goes out and wakes Codex; the rest inside the window are counted,
+    not sent, and the next push carries a "+N not pushed" note. The poster
+    process exits right after posting, so there is no timer left to flush a
+    trailing push - a suppressed message stays in the thread and counts as
+    unread for the participant's cursor, so the next peek picks it up.
+    A mention/@all/[stop] is never held back. Any failure here fails open
+    (push as before) and never raises into the poster."""
+    try:
+        now = time.time()
+        path = get_thread_push_state_path(thread_id, name)
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                state = json.load(f)
+        except Exception:
+            state = {}
+        last = float(state.get("last_push_ts", 0) or 0)
+        pending = int(state.get("suppressed", 0) or 0)
+        first = int(state.get("first_suppressed_seq", 0) or 0)
+        if not _mentions(content, name) and now - last < CODEX_PUSH_WINDOW_SECONDS:
+            atomic_write_json(path, {
+                "last_push_ts": last,
+                "suppressed": pending + 1,
+                "first_suppressed_seq": first or seq,
+            })
+            return False, ""
+        note = ""
+        if pending:
+            note = (
+                f"(+{pending} earlier message(s) since #{first} were not pushed - "
+                f"agent-peer logs --thread {thread_id} -n {pending + 2})"
+            )
+        atomic_write_json(path, {"last_push_ts": now, "suppressed": 0, "first_suppressed_seq": 0})
+        return True, note
+    except Exception:
+        return True, ""
+
+
 def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
     """Best-effort native wake for active participants. Daemon workers plus
     a bounded main-thread wait: a hung socket can delay a post by at most
@@ -259,12 +328,20 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         targets = fanout_targets(thread_id, sender, content)
         if not targets:
             return
-        frame = (
-            f"[thread: {thread_id} #{seq} from {sender}]: {content}\n"
-            f'(Reply in this thread: agent-peer send --thread {thread_id} "...")'
-        )
+        codex_names = _codex_session_names()
         workers = []
         for name, pid in targets:
+            body, note = content, ""
+            if name in codex_names:
+                push, note = _codex_push_decision(thread_id, name, seq, content)
+                if not push:
+                    continue
+                body = _codex_preview(content, thread_id)
+            frame = (
+                f"[thread: {thread_id} #{seq} from {sender}]: {body}\n"
+                + (f"{note}\n" if note else "")
+                + f'(Reply in this thread: agent-peer send --thread {thread_id} "...")'
+            )
             worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender), daemon=True)
             worker.start()
             workers.append(worker)

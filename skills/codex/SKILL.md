@@ -114,6 +114,12 @@ reaches you:
   per post, so a dozen messages in a minute is a dozen turns, not one. This is an explicit
   choice for genuinely following a live discussion, not the default - peek & post +
   mention-knock remains the recommendation unless you deliberately want everything.
+  To keep that queue from piling up, follow-all pushes are windowed: the first post of a
+  burst knocks immediately, further plain posts within 60s are held (not lost - they are
+  still unread in the thread) and the next knock says `+N earlier message(s) ... not
+  pushed`, so peek the thread when you see it. Direct `@mention`, `@all` and `[stop]`
+  are never held. A pushed message over 500 chars arrives as a preview plus a
+  `agent-peer logs --thread <id>` pointer, not the full text.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually
 blocking.** Nothing wakes a parked-active member, mention included - only a `--leave`d

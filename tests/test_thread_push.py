@@ -447,6 +447,82 @@ class ThreadPushTest(unittest.TestCase):
             proc.wait(timeout=5)
             shutil.rmtree(bin_dir, ignore_errors=True)
 
+    def _codex_follow_all_setup(self, thread_id="t1"):
+        """A follow-all Codex target whose `codex queue` is a fake that logs
+        one line per call - lets a test count real pushes end to end."""
+        from unittest import mock
+
+        bin_dir = tempfile.mkdtemp(prefix="fake-codex-bin-")
+        self.addCleanup(shutil.rmtree, bin_dir, True)
+        log = os.path.join(bin_dir, "calls.log")
+        with open(os.path.join(bin_dir, "codex"), "w", encoding="utf-8") as fh:
+            fh.write('#!/bin/sh\necho "CALL $*" | tr "\\n" " " >> "$FAKE_CODEX_LOG"\necho >> "$FAKE_CODEX_LOG"\necho \'{}\'\n')
+        os.chmod(os.path.join(bin_dir, "codex"), 0o755)
+
+        sessions_dir = os.path.join(self.home, ".claude", "sessions")
+        os.makedirs(sessions_dir, exist_ok=True)
+        proc = subprocess.Popen(["sleep", "60"])
+        self.addCleanup(lambda: (proc.terminate(), proc.wait(timeout=5)))
+        with open(os.path.join(sessions_dir, f"{proc.pid}.json"), "w", encoding="utf-8") as fh:
+            json.dump({"name": "codex-fake", "status": "idle", "agentType": "CODEX",
+                       "codexThreadId": "test-thread-uuid", "managedByAgentPeer": False}, fh)
+        with open(os.path.join(sessions_dir, f"{proc.pid}.test.key"), "w", encoding="utf-8") as fh:
+            json.dump({"peerToken": "t"}, fh)
+        path = os.path.join(self.home, ".agent-peer", "threads", f"{thread_id}.presence.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump({"codex-fake": {"pid": 999999, "last_seen": time.time(), "left": True, "follow_all": True}}, fh)
+
+        patcher = mock.patch.dict(os.environ, {"PATH": bin_dir + os.pathsep + os.environ.get("PATH", ""), "FAKE_CODEX_LOG": log})
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        def calls():
+            if not os.path.exists(log):
+                return []
+            with open(log, encoding="utf-8") as fh:
+                return [ln for ln in fh.read().splitlines() if ln.startswith("CALL")]
+
+        return calls
+
+    def test_codex_follow_all_burst_is_windowed_not_blasted(self):
+        calls = self._codex_follow_all_setup()
+        for i in range(6):
+            self._post("t1", "bob", f"banter {i}")
+        self.assertEqual(len(calls()), 1, "only the first push of a burst should reach the Codex queue")
+
+        # Window elapsed: the next push goes out and reports what was held back.
+        state = os.path.join(self.home, ".agent-peer", "cursors", "push.t1.codex-fake.json")
+        with open(state, encoding="utf-8") as fh:
+            saved = json.load(fh)
+        self.assertEqual(saved["suppressed"], 5)
+        saved["last_push_ts"] = time.time() - 600
+        with open(state, "w", encoding="utf-8") as fh:
+            json.dump(saved, fh)
+        self._post("t1", "bob", "banter after the window")
+        after = calls()
+        self.assertEqual(len(after), 2)
+        self.assertIn("+5 earlier message(s)", after[1])
+
+    def test_codex_mention_and_stop_bypass_the_window(self):
+        calls = self._codex_follow_all_setup()
+        self._post("t1", "bob", "plain banter")
+        self._post("t1", "bob", "more banter")
+        self.assertEqual(len(calls()), 1)
+        self._post("t1", "bob", "@codex-fake please look")
+        self._post("t1", "bob", "[stop] everyone halt")
+        self.assertEqual(len(calls()), 3, "both a direct mention and [stop] must bypass the window")
+
+    def test_codex_long_message_is_previewed_with_pointer(self):
+        calls = self._codex_follow_all_setup()
+        self._post("t1", "bob", "START " + ("x" * 2000) + " TAILMARKER")
+        sent = calls()
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn("TAILMARKER", sent[0])
+        self.assertIn("truncated, 2017 chars", sent[0])
+        self.assertIn("agent-peer logs --thread t1", sent[0])
+        self.assertLess(len(sent[0]), 1200)
+
     def test_busy_active_silent_left_knock_rings(self):
         # Busy no longer gates anything for actives (they are poll-only);
         # the knock path is left + mention, regardless of busy status.

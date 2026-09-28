@@ -67,6 +67,10 @@ def get_thread_cursor_path(thread_id: str, participant: str) -> str:
     ensure_dirs()
     return os.path.join(CURSORS_DIR, f"thread.{thread_id}.{participant}.json")
 
+def get_thread_push_state_path(thread_id: str, participant: str) -> str:
+    ensure_dirs()
+    return os.path.join(CURSORS_DIR, f"push.{thread_id}.{participant}.json")
+
 def get_thread_presence_path(thread_id: str) -> str:
     ensure_dirs()
     return os.path.join(THREADS_DIR, f"{thread_id}.presence.json")
