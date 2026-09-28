@@ -1,15 +1,16 @@
 # Changelog
 
-## Unreleased
+## 0.9.3
 
 - **Codex follow-all no longer floods the Codex queue.** A Codex session that opted into
   follow-all now gets the first post of a burst immediately; further plain posts are held
   while Codex still has an unconsumed item in its own queue (for example during a long
   tool call) or within 60 seconds of the last push. Held posts stay unread in the thread
   and the next push says how many were not pushed. `[stop]` is never held; a direct
-  `@mention` or `@all` may queue up to two deep. A pushed message
-  over 500 characters arrives as a preview plus a `agent-peer logs --thread <id>` pointer
-  instead of the full text.
+  `@mention` or `@all` may queue up to two deep. A pushed message over 500 characters
+  arrives as a preview plus an `agent-peer logs --thread <id>` pointer instead of the full
+  text. The queue depth is read (read-only) from Codex's own local queue database; if that
+  cannot be read, only the 60-second window applies and posting is never affected.
 - **Fixed:** a session that registered after a thread view (`join`, `logs --thread -f`)
   was opened, under a custom name with no harness word in it, was labeled as Claude. The
   live view now refreshes its session list when it meets an unknown sender.
