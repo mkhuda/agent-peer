@@ -274,6 +274,9 @@ else:
 # Unlike flock, a lock FILE isn't auto-released on crash - acquire_lock stores
 # its pid and reclaims a lock whose owner is no longer alive.
 
+_EMPTY_LOCK_STALE_SECONDS = 2.0
+
+
 class LockHandle:
     """fd + path, so release_lock can unlink - a stale pid left on disk
     could later match a reused pid and wedge the lock forever."""
@@ -288,7 +291,7 @@ def acquire_lock(lock_path: str):
     """Returns a LockHandle on success, or None if another live process
     already holds this lock. Safe to call when the previous holder crashed
     without releasing - a dead owner's lock is reclaimed automatically."""
-    for attempt in range(3):
+    for attempt in range(4):
         try:
             fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_RDWR)
             os.write(fd, str(os.getpid()).encode("utf-8"))
@@ -303,10 +306,13 @@ def acquire_lock(lock_path: str):
                     if attempt < 2:
                         time.sleep(0.03)
                         continue
-                    return None
-                holder_pid = int(content)
-                if is_pid_alive(holder_pid):
-                    return None
+                    # An owner that died between open() and write() leaves an empty file forever.
+                    if time.time() - os.path.getmtime(lock_path) < _EMPTY_LOCK_STALE_SECONDS:
+                        return None
+                else:
+                    holder_pid = int(content)
+                    if is_pid_alive(holder_pid):
+                        return None
             except (OSError, ValueError):
                 pass  # unreadable/corrupt lock file - treat as stale too
             try:

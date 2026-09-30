@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.6
+
+- **Thread presence no longer gets stuck.** If a process was killed at the wrong moment while
+  updating a thread's presence, it left behind an empty lock file that was never cleaned up.
+  From then on nobody's presence in that thread was updated, so members looked gone and
+  pushes stopped reaching them. Empty lock files older than two seconds are now treated as
+  abandoned and reclaimed automatically.
+
 ## 0.9.5
 
 - **A Codex session keeps its registered name across a Codex update or restart.** A Codex
