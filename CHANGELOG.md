@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.7
+
+- **Messages to a Codex session show when they were sent.** A busy Codex takes queued
+  messages late, sometimes hours later, so an old direct message could read like a fresh
+  order. The message header now carries the send time, and a short note tells Codex to
+  confirm with the sender if newer instructions exist.
+- **`agent-peer list` shows a Codex session's waiting messages**, for example
+  `[3 unread, oldest 42m]`, so you can tell when to wait and when to re-send.
+
 ## 0.9.6
 
 - **Thread presence no longer gets stuck.** If a process was killed at the wrong moment while

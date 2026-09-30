@@ -17,12 +17,15 @@ def _resolve_sender_cwd(from_name: str):
     except Exception:
         return None
 
-def _with_sender_header(content: str, from_name: str, from_cwd) -> str:
+def _with_sender_header(content: str, from_name: str, from_cwd, sent_at: Optional[str] = None) -> str:
     """A real native Claude Code recipient only ever sees 'content' - its own
     binary renders the message without surfacing the 'from'/'from_cwd'
     fields, so the sender label has to live inside the text itself here."""
-    header = f"[from {from_name}" + (f" · {from_cwd}]" if from_cwd else "]")
+    header = f"[from {from_name}" + (f" · {from_cwd}" if from_cwd else "") + (f" · sent {sent_at}" if sent_at else "") + "]"
     return f"{header}\n{content}"
+
+_CODEX_STALE_NOTE = "\n(Queued DM: if it is older than newer instructions from the user or the room, confirm with the sender before acting.)"
+
 
 def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name: str, from_cwd, priority: str) -> Dict[str, Any]:
     """Deliver natively via 'codex queue', bypassing the file-based inbox entirely."""
@@ -31,7 +34,8 @@ def _send_via_codex_queue(session: Dict, thread_id: str, content: str, from_name
 
     # codex queue only carries plain text - no structured 'from'/'from_cwd'
     # fields exist for it, so the sender label has to live in the text itself.
-    wire_content = _with_sender_header(content, from_name, from_cwd)
+    # A busy Codex takes queued items late, so the send time lets it judge staleness.
+    wire_content = _with_sender_header(content, from_name, from_cwd, time.strftime("%H:%M:%S")) + _CODEX_STALE_NOTE
 
     t0 = time.time()
     result = subprocess.run(

@@ -79,6 +79,23 @@ class CodexBusyStatusTest(unittest.TestCase):
         self._queue([45])
         self.assertEqual(self._status(), "new-msg")
 
+    def test_list_shows_unread_count_and_oldest_age(self):
+        self._queue([600, 30, 5])
+        out = run_cli(["list"], self.home).stdout
+        line = next(ln for ln in out.splitlines() if "codex-x" in ln)
+        self.assertIn("[3 unread, oldest 10m]", line)
+
+    def test_empty_queue_shows_no_unread_marker(self):
+        self._queue([])
+        out = run_cli(["list"], self.home).stdout
+        self.assertNotIn("unread", out)
+
+    def test_unread_marker_survives_new_msg_status(self):
+        self._write_session("new-msg")
+        self._queue([45])
+        out = run_cli(["list"], self.home).stdout
+        self.assertIn("[1 unread, oldest 45s]", out)
+
 
 if __name__ == "__main__":
     unittest.main()

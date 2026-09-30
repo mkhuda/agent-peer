@@ -49,8 +49,13 @@ def cmd_list(args):
             cwd = "~" + cwd[len(home):]
         if len(cwd) > 30:
             cwd = "..." + cwd[-27:]
-        print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}")
+        queued = f"  [{s['queued']} unread, oldest {_short_age(s.get('queuedOldestAgeS', 0))}]" if s.get("queued") else ""
+        print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}{queued}")
     print(f"\nTotal: {len(sessions)} sessions registered in ~/.claude/sessions/")
+
+def _short_age(seconds: int) -> str:
+    return f"{seconds}s" if seconds < 60 else f"{seconds // 60}m" if seconds < 3600 else f"{seconds // 3600}h"
+
 
 def cmd_prune(args):
     """Remove registrations for sessions whose process is confirmed dead

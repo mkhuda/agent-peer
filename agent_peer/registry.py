@@ -68,9 +68,12 @@ def _apply_codex_queue_status(sessions: List[Dict]) -> None:
     for s in sessions:
         if s.get("agentType") != "CODEX" or not s.get("alive") or not s.get("codexThreadId"):
             continue
+        state = queue_state(s["codexThreadId"])
+        if state and state[0] >= 1 and state[1]:
+            s["queued"] = state[0]
+            s["queuedOldestAgeS"] = int(now - state[1])
         if s.get("status") == "new-msg":
             continue
-        state = queue_state(s["codexThreadId"])
         if state and state[0] >= 1 and state[1] and now - state[1] >= _CODEX_BUSY_MIN_QUEUE_AGE_S:
             s["status"] = "busy"
 
