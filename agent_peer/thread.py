@@ -390,10 +390,11 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
                 body = _codex_preview(content, thread_id)
                 # A queued frame can run many minutes after it was sent.
                 note = (note + "\n" if note else "") + (
-                    f"(This may be stale - newer posts may be waiting: agent-peer thread {thread_id} --timeout 10)"
+                    f"(Sent {time.strftime('%H:%M:%S')}; it may have waited in the queue. Before acting, run "
+                    f"agent-peer thread {thread_id} --timeout 10 - a newer [change]/[stop] there overrides this.)"
                 )
             frame = (
-                f"[thread: {thread_id} #{seq} from {sender}]: {body}\n"
+                f"[thread: {thread_id} #{seq} from {sender} · {time.strftime('%H:%M:%S')}]: {body}\n"
                 + (f"{note}\n" if note else "")
                 + f'(Reply in this thread: agent-peer send --thread {thread_id} "...")'
             )

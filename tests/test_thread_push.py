@@ -566,7 +566,9 @@ class ThreadPushTest(unittest.TestCase):
         after = calls()
         self.assertEqual(len(after), 1)
         self.assertIn("+1 earlier message(s)", after[0])
-        self.assertIn("may be stale", after[0])
+        self.assertRegex(after[0], r"\(Sent \d\d:\d\d:\d\d; it may have waited in the queue")
+        self.assertIn("agent-peer thread t1 --timeout 10", after[0])
+        self.assertIn("overrides this", after[0])
 
     def test_codex_mention_queues_up_to_depth_two_and_stop_is_never_held(self):
         calls = self._codex_follow_all_setup()

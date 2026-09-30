@@ -38,8 +38,11 @@ class CodexDmHeaderTest(unittest.TestCase):
         self.assertIn("\ndo X\n", text)
         self.assertIn("confirm with the sender", text)
 
-    def test_claude_header_is_unchanged(self):
+    def test_header_without_time_is_unchanged(self):
         self.assertEqual(sender._with_sender_header("hi", "a", "/w"), "[from a · /w]\nhi")
+
+    def test_native_claude_header_has_send_time(self):
+        self.assertEqual(sender._with_sender_header("hi", "a", "/w", "09:05:01"), "[from a · /w · sent 09:05:01]\nhi")
 
 
 if __name__ == "__main__":

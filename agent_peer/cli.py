@@ -53,6 +53,16 @@ def cmd_list(args):
         print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}{queued}")
     print(f"\nTotal: {len(sessions)} sessions registered in ~/.claude/sessions/")
 
+def _clock(ts) -> str:
+    """HH:MM:SS, with the date when older than a day; empty when the record has no time."""
+    if not isinstance(ts, (int, float)) or ts <= 0:
+        return ""
+    fmt = "%H:%M:%S" if time.time() - ts < 86400 else "%m-%d %H:%M:%S"
+    age = time.time() - ts
+    ago = f" ({_short_age(int(age))} ago)" if age >= 60 else ""
+    return " · " + time.strftime(fmt, time.localtime(ts)) + ago
+
+
 def _short_age(seconds: int) -> str:
     return f"{seconds}s" if seconds < 60 else f"{seconds // 60}m" if seconds < 3600 else f"{seconds // 3600}h"
 
@@ -251,7 +261,7 @@ def cmd_wait(args):
             for msg in msgs:
                 from_label = msg.get("from", "unknown")
                 cwd_suffix = f" ({msg['from_cwd']})" if msg.get("from_cwd") else ""
-                print(f"📬 [NEW MESSAGE from {from_label}{cwd_suffix}]: {msg.get('content')}")
+                print(f"📬 [NEW MESSAGE from {from_label}{cwd_suffix}{_clock(msg.get('received_at'))}]: {msg.get('content')}")
             _reset_status_idle(session)
             sys.exit(0)
         else:
@@ -301,7 +311,7 @@ def cmd_thread(args):
         msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow)
         if msgs:
             for msg in msgs:
-                print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}]: {msg.get('content')}")
+                print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}{_clock(msg.get('ts'))}]: {msg.get('content')}")
             sys.exit(0)
         else:
             print("Timeout waiting for a thread message.")

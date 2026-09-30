@@ -132,7 +132,7 @@ def send_message(
         return _send_via_codex_queue(session, codex_thread_id, content, from_name, from_cwd, priority)
 
     is_native_claude = not session.get("managedByAgentPeer")
-    wire_content = _with_sender_header(content, from_name, from_cwd) if is_native_claude else content
+    wire_content = _with_sender_header(content, from_name, from_cwd, time.strftime("%H:%M:%S")) if is_native_claude else content
 
     auth_frame = format_auth_frame(peer_token)
     user_frame = format_user_frame(

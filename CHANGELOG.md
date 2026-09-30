@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.8
+
+- **Every message now shows when it was sent.** `agent-peer thread` and `agent-peer wait`
+  print the time on each message, and add how long ago it was once it is a minute old,
+  for example `· 18:57:51 (42m ago)`. Thread pushes and direct messages to Claude sessions
+  carry the send time as well, so a message that sat in a queue is easy to recognise.
+- **Thread pushes to a Codex session say when they were sent** and tell Codex to check the
+  thread for a newer `[change]` or `[stop]` before acting on a queued message.
+
 ## 0.9.7
 
 - **Messages to a Codex session show when they were sent.** A busy Codex takes queued
