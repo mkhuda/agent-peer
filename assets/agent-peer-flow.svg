@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 690" width="1100" height="690" role="img" aria-labelledby="t d">
+  <title id="t">How agent-peer delivers a message</title>
+  <desc id="d">agent-peer send finds the target in the registry, then delivers natively to Claude Code and Codex CLI, or through a Unix socket, inbox file and wait loop to Antigravity, pi, opencode and muse. Every delivery is recorded in the shared registry and state directory.</desc>
+  <defs>
+    <filter id="chalk" x="-4%" y="-6%" width="108%" height="112%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="7" xChannelSelector="R" yChannelSelector="G" result="shape"/>
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="3" result="grain"/>
+      <feColorMatrix in="grain" type="matrix" values="0 0 0 0 1  0 0 0 0 1  0 0 0 0 1  0 0 0 -2.1 0.98" result="speck"/>
+      <feComposite in="speck" in2="shape" operator="in" result="speckIn"/>
+      <feMerge><feMergeNode in="shape"/><feMergeNode in="speckIn"/></feMerge>
+    </filter>
+    <filter id="pencil" x="-5%" y="-5%" width="110%" height="110%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="2" seed="11" result="warp"/>
+      <feDisplacementMap in="SourceGraphic" in2="warp" scale="3.5" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <marker id="head" viewBox="0 0 14 14" markerWidth="14" markerHeight="14" refX="11" refY="7" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M2 2.5 L11.5 7 L2 11.5" fill="none" stroke="#2c2f36" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+    <marker id="headSmall" viewBox="0 0 12 12" markerWidth="11" markerHeight="11" refX="9" refY="6" orient="auto" markerUnits="userSpaceOnUse">
+      <path d="M2 2 L10 6 L2 10" fill="none" stroke="#1b2a4a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+
+  <rect width="1100" height="690" fill="#ffffff"/>
+
+  <!-- boxes -->
+  <g filter="url(#chalk)">
+    <rect x="310" y="24" width="480" height="98" rx="14" fill="#5b7eab"/>
+    <rect x="48" y="210" width="380" height="210" rx="14" fill="#a3bdb1"/>
+    <rect x="470" y="210" width="582" height="210" rx="14" fill="#bdbfe3"/>
+    <rect x="48" y="500" width="1004" height="150" rx="14" fill="#a9c0de"/>
+  </g>
+  <g filter="url(#pencil)" fill="none" stroke="#ffffff" stroke-opacity="0.55" stroke-width="1.6" stroke-dasharray="7 5 2 6">
+    <rect x="317" y="31" width="466" height="84" rx="10"/>
+    <rect x="55" y="217" width="366" height="196" rx="10"/>
+    <rect x="477" y="217" width="568" height="196" rx="10"/>
+    <rect x="55" y="507" width="990" height="136" rx="10"/>
+  </g>
+
+  <!-- socket chips -->
+  <g filter="url(#pencil)" fill="#ffffff" fill-opacity="0.55" stroke="#1b2a4a" stroke-opacity="0.55" stroke-width="1.8">
+    <rect x="490" y="338" width="104" height="46" rx="9"/>
+    <rect x="636" y="338" width="104" height="46" rx="9"/>
+    <rect x="782" y="338" width="104" height="46" rx="9"/>
+    <rect x="928" y="338" width="104" height="46" rx="9"/>
+  </g>
+
+  <!-- arrows -->
+  <g filter="url(#pencil)" fill="none" stroke="#2c2f36" stroke-width="3" stroke-linecap="round">
+    <path d="M440 128 C390 162 290 170 240 200" marker-end="url(#head)"/>
+    <path d="M660 128 C710 162 810 170 860 200" marker-end="url(#head)"/>
+    <path d="M238 426 C236 455 240 472 242 490" marker-end="url(#head)"/>
+    <path d="M762 426 C764 455 752 472 746 490" marker-end="url(#head)"/>
+  </g>
+  <g filter="url(#pencil)" fill="none" stroke="#1b2a4a" stroke-opacity="0.8" stroke-width="2.4" stroke-linecap="round">
+    <path d="M599 362 C608 359 620 359 631 362" marker-end="url(#headSmall)"/>
+    <path d="M745 362 C754 359 766 359 777 362" marker-end="url(#headSmall)"/>
+    <path d="M891 362 C900 359 912 359 923 362" marker-end="url(#headSmall)"/>
+  </g>
+
+  <!-- top box text -->
+  <g font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" text-anchor="middle">
+    <text x="550" y="68" font-size="22" font-weight="700" fill="#ffffff">agent-peer send &lt;peer&gt; "message"</text>
+    <text x="550" y="98" font-size="14" fill="#e6eefb">The peer is found by name or PID in the registry</text>
+  </g>
+
+  <g font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" fill="#1b2a4a">
+    <!-- native -->
+    <text x="68" y="246" font-size="15" font-weight="700" letter-spacing="1">NATIVE HARNESSES</text>
+    <text x="68" y="268" font-size="13" font-style="italic">Claude Code · Codex CLI</text>
+    <text x="68" y="304" font-size="13">Claude Code: its own /peer socket.</text>
+    <text x="68" y="326" font-size="13">Codex CLI: codex queue --thread &lt;id&gt;.</text>
+    <text x="68" y="360" font-size="13">No listen or wait step needed:</text>
+    <text x="68" y="380" font-size="13">the message simply arrives.</text>
+    <text x="408" y="254" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">02</text>
+
+    <!-- socket -->
+    <text x="490" y="246" font-size="15" font-weight="700" letter-spacing="1">SOCKET HARNESSES</text>
+    <text x="490" y="268" font-size="13" font-style="italic">Antigravity · pi · opencode · muse</text>
+    <text x="490" y="298" font-size="13">A Unix socket (Named Pipe on Windows), opened only after a handshake:</text>
+    <text x="490" y="318" font-size="13">live pid, matching start time, and the session's auth token.</text>
+    <text x="1032" y="254" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">02</text>
+    <g font-size="13" font-weight="700" text-anchor="middle">
+      <text x="542" y="366">listen</text>
+      <text x="688" y="366">socket frame</text>
+      <text x="834" y="366">inbox file</text>
+      <text x="980" y="366">wait wakes</text>
+    </g>
+    <text x="490" y="406" font-size="12" font-style="italic">wait blocks, merges any backlog, and returns the instant a message lands. No polling.</text>
+
+    <!-- state -->
+    <text x="68" y="536" font-size="15" font-weight="700" letter-spacing="1">REGISTRY</text>
+    <text x="68" y="562" font-size="13">~/.claude/sessions/*.json</text>
+    <text x="68" y="584" font-size="13">name · pid · peerToken</text>
+    <text x="68" y="606" font-size="13">cwd · engine (auto-detected)</text>
+
+    <text x="400" y="536" font-size="15" font-weight="700" letter-spacing="1">STATE</text>
+    <text x="400" y="562" font-size="13">~/.agent-peer/</text>
+    <text x="400" y="584" font-size="13">inbox.jsonl · cursors · threads</text>
+    <text x="400" y="606" font-size="13">locks (one wait per session)</text>
+
+    <text x="740" y="536" font-size="15" font-weight="700" letter-spacing="1">LOGGED EVERYWHERE</text>
+    <text x="740" y="562" font-size="13">list · watch · logs show the whole</text>
+    <text x="740" y="584" font-size="13">mesh, whichever transport carried</text>
+    <text x="740" y="606" font-size="13">the message.</text>
+    <text x="1032" y="544" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">03</text>
+  </g>
+
+  <text x="550" y="674" text-anchor="middle" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="14" fill="#6b7280" letter-spacing="0.5">One command for every target: agent-peer picks the transport underneath.</text>
+</svg>

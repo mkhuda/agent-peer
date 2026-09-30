@@ -27,6 +27,8 @@ from . import compat
 # before delivery completed, silently dropping the push. 3s gives that
 # room while still bounding a poster's worst-case delay to a few seconds
 # rather than hanging indefinitely on a genuinely dead/hung target.
+# A re-arm loop refreshes presence within seconds; past this an active member with a dead pid is deaf.
+ACTIVE_DEAD_GRACE_SECONDS = 30.0
 FANOUT_BUDGET_SECONDS = 3.0
 # Only a cap, not a fixed wait: the poster leaves as soon as its workers
 # finish. A `codex queue` is a separate process that must start and connect to
@@ -232,6 +234,13 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
         if not isinstance(pid, int):
             continue
         if not info.get("left"):
+            # An active member whose poll process has long ended is deaf; a mention knock is its only way in.
+            last_seen = info.get("last_seen")
+            last_seen = last_seen if isinstance(last_seen, (int, float)) else 0
+            if (compat.is_pid_alive(pid) or time.time() - last_seen <= ACTIVE_DEAD_GRACE_SECONDS
+                    or not _mentions(content, name)):
+                continue
+            targets.append((name, pid))
             continue
         # A still-running peek already sees the mention via its own poll.
         if compat.is_pid_alive(pid):
@@ -596,6 +605,7 @@ def wait_for_thread_message(
     participant: str,
     timeout: Optional[float] = None,
     follow: Optional[bool] = None,
+    mention_only: bool = False,
 ) -> Optional[List[Dict[str, Any]]]:
     """Immediate-backlog-then-poll, like inbox.py's wait_for_message but
     shared. Cursor advances to unread[-1]'s seq (not a fresh re-read, which
@@ -603,18 +613,23 @@ def wait_for_thread_message(
     Timeout-as-intent: a bounded wait is a peek (gated), only an indefinite
     wait arms full room presence. `follow` (0035) opts a gated participant
     into "follow-all" - every other participant's post knocks, not just
-    @mentions - see touch_thread_presence for its carry-forward semantics."""
+    @mentions - see touch_thread_presence for its carry-forward semantics.
+    `mention_only` stays silent (cursor untouched) until a post mentions the
+    participant, then returns every unread post as context."""
     touch_thread_presence(thread_id, participant, left=(timeout is not None), follow=follow)
 
+    def ready(unread):
+        return bool(unread) and (not mention_only or any(_mentions(m.get("content") or "", participant) for m in unread))
+
     unread = get_thread_unread(thread_id, participant)
-    if unread:
+    if ready(unread):
         _write_thread_cursor(thread_id, participant, unread[-1]["seq"])
         return unread
 
     t0 = time.time()
     while True:
         unread = get_thread_unread(thread_id, participant)
-        if unread:
+        if ready(unread):
             _write_thread_cursor(thread_id, participant, unread[-1]["seq"])
             return unread
         if timeout is not None and (time.time() - t0) >= timeout:

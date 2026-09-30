@@ -303,6 +303,10 @@ def cmd_thread(args):
     timeout = args.timeout if args.timeout > 0 else None
     participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
+    if args.mention_only and timeout is not None:
+        print("❌ --mention-only keeps you in the room until you are mentioned; it cannot be combined with --timeout (a timed call is a peek).", file=sys.stderr)
+        sys.exit(2)
+
     if args.leave:
         if leave_thread_presence(args.thread_id, participant):
             print(f"Left thread '{args.thread_id}' - banter will no longer push you, but @mentions still knock. Rejoin anytime: agent-peer thread {args.thread_id}")
@@ -319,7 +323,7 @@ def cmd_thread(args):
 
     try:
         follow = True if args.follow else None
-        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow)
+        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow, mention_only=args.mention_only)
         if msgs:
             for msg in msgs:
                 print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}{_clock(msg.get('ts'))}]: {msg.get('content')}")
@@ -556,9 +560,10 @@ def main():
     p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time", epilog="Presence note: an indefinite wait holds active room presence only while this command keeps running - loop it continuously (see skills/<your-harness>/SKILL.md for the exact per-harness idiom).")
     p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
-    p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped; a bounded timeout is just a peek)")
+    p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped: a finished bare call leaves you marked active with no poll behind it; a bounded timeout is just a peek)")
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("--follow", action="store_true", help="Opt in to follow-all: every other participant's post knocks while you're gated, not just @mentions - costs one push per message, standing until --leave (see skills/codex/SKILL.md for the cost trade-off)")
+    p_thread.add_argument("--mention-only", action="store_true", help="Stay in the room but return only when a post mentions you (@name, @all or [stop]); then print everything unread as context. Not for agents that must see all traffic.")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
     p_thread.add_argument("-a", "--all", action="store_true", help="With --interactive: scope the invite picker mesh-wide instead of just this workspace")

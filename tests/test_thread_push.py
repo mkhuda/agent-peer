@@ -183,6 +183,62 @@ class ThreadPushTest(unittest.TestCase):
         finally:
             server.close()
 
+    def _set_presence(self, thread_id, name, pid, age_seconds, left=False):
+        path = os.path.join(self.home, ".agent-peer", "threads", f"{thread_id}.presence.json")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                presence = json.load(fh)
+        except Exception:
+            presence = {}
+        presence[name] = {"pid": pid, "last_seen": time.time() - age_seconds, "left": left, "follow_all": False}
+        with open(path, "w", encoding="utf-8") as fh:
+            json.dump(presence, fh)
+
+    def _knocked(self, name, text, timeout=5):
+        return wait_until(lambda: any(text in c for c in _inbox_contents(self.home, name)), timeout=timeout)
+
+    def test_active_member_whose_poll_ended_is_knocked_on_a_mention(self):
+        # An agent armed `thread` once, the call returned, and it now only runs `wait`.
+        self._listen("agy-x")
+        self._set_presence("t1", "agy-x", pid=424242, age_seconds=120)
+        self._post("t1", "bob", "@agy-x please look")
+        self.assertTrue(self._knocked("agy-x", "@agy-x please look"))
+
+    def test_deaf_active_member_is_knocked_on_all_and_stop_but_not_on_banter(self):
+        self._listen("agy-x")
+        self._set_presence("t1", "agy-x", pid=424242, age_seconds=120)
+        self._post("t1", "bob", "just chatting")
+        self._post("t1", "bob", "@all heads up")
+        self.assertTrue(self._knocked("agy-x", "@all heads up"))
+        self._post("t1", "bob", "[stop] everything")
+        self.assertTrue(self._knocked("agy-x", "[stop] everything"))
+        self.assertFalse(any("just chatting" in c for c in _inbox_contents(self.home, "agy-x")))
+
+    def test_recently_seen_active_member_is_not_knocked_so_a_rearm_loop_gets_no_double(self):
+        self._listen("agy-x")
+        self._set_presence("t1", "agy-x", pid=424242, age_seconds=5)
+        self._post("t1", "bob", "@agy-x please look")
+        time.sleep(1)
+        self.assertEqual(_inbox_contents(self.home, "agy-x"), [])
+
+    def test_active_member_with_a_live_poll_is_never_knocked_however_old(self):
+        self._listen("agy-x")
+        live = subprocess.Popen(["sleep", "30"])
+        self.addCleanup(live.kill)
+        self._set_presence("t1", "agy-x", pid=live.pid, age_seconds=600)
+        self._post("t1", "bob", "@agy-x please look")
+        time.sleep(1)
+        self.assertEqual(_inbox_contents(self.home, "agy-x"), [])
+
+    def test_wait_wakes_an_agent_whose_thread_call_already_ended(self):
+        self._listen("agy-x")
+        self._set_presence("t1", "agy-x", pid=424242, age_seconds=120)
+        self._post("t1", "bob", "@agy-x please look")
+        woke = run_cli(["wait", "--name", "agy-x", "--timeout", "5"], self.home, timeout=20)
+        self.assertEqual(woke.returncode, 0, woke.stdout + woke.stderr)
+        self.assertIn("@agy-x please look", woke.stdout)
+
     def test_managed_session_skipped_no_dupe(self):
         self._listen("anna")
         self._waiter("t1", "anna")

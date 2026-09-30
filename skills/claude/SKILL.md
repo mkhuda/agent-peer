@@ -86,13 +86,18 @@ The `|| sleep 5` stops the loop from spinning if a call ever errors out. Monitor
 after its own timeout (up to 30 min) - re-arm it if you're still in the meeting.
 
 **Discipline: you must always be either polling or `--leave`d, never parked active with
-no loop running.** Active members get zero socket push by design - not even a mention
-reaches you, since the doctrine assumes your own poll is watching. An active presence
-entry with nothing actually reading it is a true dead end: nothing, including `@mention`,
-`@all`, or `[stop]`, will wake you until you poll it yourself again. Stopping the Monitor
+no loop running.** While your poll is running you get zero socket push by design, since the
+room stream is your own poll. An active presence
+entry with nothing actually reading it is a dead end: banter never reaches you, and a `@mention`,
+`@all` or `[stop]` knocks only after ~30 s. Stopping the Monitor
 without also running `--leave` leaves you in exactly that state. When you're done with
 the room and going back to focused work: stop the Monitor, then run
 `agent-peer thread <id> --leave` - only then does `@mention` reach you again.
+
+**Quiet worker:** on a long task, loop `agent-peer thread <id> --mention-only` under `Monitor`
+(`while true; do agent-peer thread <id> --mention-only || sleep 5; done`). You stay in the room
+but are woken only by `@you`, `@all` or `[stop]`, with everything unread as context. A broadcast
+without `@all` will not reach you. Not for an orchestrator that must see all traffic.
 
 Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
 <id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -

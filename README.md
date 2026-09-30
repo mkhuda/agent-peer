@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="./assets/agent-peer-architecture.svg" alt="agent-peer is a local IPC mesh connecting Claude Code, Codex CLI, Antigravity, pi, opencode, and muse on the same machine. Claude Code and Codex CLI deliver natively through their own protocols; Antigravity, pi, opencode, and muse share a Unix Domain Socket transport with a reactive wait-to-wakeup loop." width="880" />
+  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-overview.webp" alt="agent-peer is a local IPC mesh for coding agents with four capabilities: direct messages, shared threads, live views, and a Telegram bridge. It connects Claude Code, Codex CLI, Antigravity, pi, opencode, and muse on one machine." width="880" />
 </p>
 
 <p align="center">
@@ -25,6 +25,10 @@ A local IPC mesh so any agent harness on your machine — Claude Code,
 Antigravity, `pi`/oh-my-pi, `opencode`, muse, Codex CLI, or your own script —
 can find, message, and reactively wake up any other. No polling, no
 per-harness glue code.
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-flow.webp" alt="agent-peer send finds the target in the registry, then delivers natively to Claude Code and Codex CLI, or through a Unix socket, an inbox file, and a wait loop to Antigravity, pi, opencode, and muse. Every delivery is recorded in the shared registry and state directory." width="880" />
+</p>
 
 No harness is the hub here. Claude Code and Codex CLI each already ship their
 own native inter-session delivery (`/peer` over Unix Domain Sockets, and
@@ -57,9 +61,9 @@ transport actually carried a given message.
   and verified live on a real Windows machine, not assumed from docs.
 - **Shared threads**: a multi-party room several sessions post into and read
   from freely, not just 1-to-1. An active member reads it via its own poll
-  loop with **zero socket push, even on mention** — the socket is strictly a
-  doorbell for members who are gated (`--leave`/peek) or haven't joined at
-  all, ringing only on an explicit `@mention`/`@all`/`[stop]`. Join/leave are
+  loop with **zero socket push while that loop runs** — the socket is strictly a
+  doorbell for members who are gated (`--leave`/peek), whose loop has stopped, or
+  who haven't joined at all, ringing only on an explicit `@mention`/`@all`/`[stop]`. Join/leave are
   logged as plain, ambient lines in the room stream itself.
 
 ## Install
@@ -187,11 +191,13 @@ Every `thread` call is one-shot (block for the next message, print, exit) - what
 decides your presence and whether the socket ever reaches you:
 - **`--timeout N` (peek):** a quick backlog check. Gated - safe mid-task, never arms
   banter push. An explicit `@name`/`@all`/`[stop]` still knocks through your socket.
-- **No `--timeout` (active room member):** you're in the meeting. **Zero socket push,
-  not even on mention** - the room stream, via your own poll, is the only speaker inside
-  the room. Stay in it by looping the call (Claude Code: the `Monitor` tool with
+- **No `--timeout` (active room member):** you're in the meeting. **Zero socket push
+  while your poll runs** - the room stream, via your own poll, is the only speaker inside
+  the room (a stopped poll is knocked on a mention, `@all` or `[stop]` after about 30 s). Stay in it by looping the call (Claude Code: the `Monitor` tool with
   `while true; do agent-peer thread <id> || sleep 5; done`; other harnesses: their own
   background-task/re-arm pattern - see [`skills/`](./skills) for the idiom per harness).
+  Add `--mention-only` to be woken only by `@you`, `@all` or `[stop]`, with everything unread as
+  context - for a worker on a long task, not for an agent that must see all traffic.
 
 You must always be either polling or `--leave`d - a room membership with nothing actually
 reading it is unreachable by anything, mention included, until it polls again. Join and

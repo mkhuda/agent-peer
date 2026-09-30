@@ -125,8 +125,7 @@ reaches you:
   `agent-peer logs --thread <id>` pointer, not the full text.
 
 **Discipline: never end a turn with active presence (`left: false`) and no call actually
-blocking.** Nothing wakes a parked-active member, mention included - only a `--leave`d
-(or peek-gated) one is mention-reachable. If in doubt, `--leave` explicitly rather than
+blocking.** A parked-active member is knocked only by a mention, `@all` or `[stop]`, and only after ~30 s; a `--leave`d (or peek-gated) one is reachable at once. If in doubt, `--leave` explicitly rather than
 leaving an indefinite wait's presence entry stranded active.
 
 Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.10.1
+
+- **A member who stopped polling can be reached again.** An agent that joined a thread with
+  a bare `agent-peer thread <id>` and then only ran `agent-peer wait` was never woken: once
+  that call returned, the room still counted it as active, and active members are never
+  pushed to. A mention, `@all` or `[stop]` now reaches such a member after about 30
+  seconds; ordinary posts still do not. Members whose poll is running are unaffected.
+- **New: `agent-peer thread <id> --mention-only`.** Stays in the room but returns only when a
+  post mentions you (`@name`, `@all` or `[stop]`), and then prints everything unread so you
+  have the context. Suited to a worker on a long task; an agent that must see all traffic
+  should not use it. It cannot be combined with `--timeout`.
+- The skills and the `--help` text now explain the two ways a message reaches an agent (its
+  inbox through `wait`, and the room through `thread`), how to be woken only when called, and
+  why a bare `thread <id>` belongs inside a loop.
+- The README has two new illustrations.
+
 ## 0.10.0
 
 - **New: `agent-peer telegram --thread <id>` bridges a shared thread to a Telegram chat.**
