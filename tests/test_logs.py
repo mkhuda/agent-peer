@@ -38,12 +38,12 @@ class HarnessBadgeTest(unittest.TestCase):
         self.assertIn("YOU", _strip_ansi(badge))
 
     def test_each_known_harness_gets_a_distinct_background(self):
-        types = ["CLAUDE", "CODEX", "AGY", "MUSE", "PI", "OPENCODE"]
+        types = ["CLAUDE", "CODEX", "AGY", "MUSE", "PI", "OPENCODE", "TELEGRAM"]
         bgs = [_bg_code(format_harness_fill_badge(t, use_color=True)) for t in types]
         self.assertEqual(len(bgs), len(set(bgs)), f"expected distinct backgrounds, got {bgs}")
 
     def test_badge_text_always_contrasts_with_its_background(self):
-        for t in ["CLAUDE", "CODEX", "AGY", "MUSE", "PI", "OPENCODE"]:
+        for t in ["CLAUDE", "CODEX", "AGY", "MUSE", "PI", "OPENCODE", "TELEGRAM"]:
             badge = format_harness_fill_badge(t, use_color=True)
             self.assertNotEqual(_bg_code(badge), _fg_code(badge), f"{t} badge text unreadable")
 
@@ -61,8 +61,34 @@ class ResolveAgentTypeTest(unittest.TestCase):
         for name, expected in cases.items():
             self.assertEqual(resolve_agent_type(name, {}), expected, name)
 
-    def test_unrecognized_name_falls_back_to_claude(self):
-        self.assertEqual(resolve_agent_type("rg", {}), "Claude")
+    def test_unrecognized_unregistered_name_gets_no_badge(self):
+        self.assertEqual(resolve_agent_type("rg", {}), "")
+        self.assertEqual(resolve_agent_type("foreman", {}), "")
+
+    def test_telegram_bridge_has_its_own_badge_and_color(self):
+        self.assertEqual(resolve_agent_type("foreman-telegram", {}), "TELEGRAM")
+        types = ["CLAUDE", "CODEX", "AGY", "MUSE", "PI", "OPENCODE", "TELEGRAM"]
+        bgs = [_bg_code(format_harness_fill_badge(t, use_color=True)) for t in types]
+        self.assertEqual(len(bgs), len(set(bgs)))
+
+    def test_registered_native_claude_with_custom_name_is_claude(self):
+        from agent_peer import logs
+
+        orig = logs.get_active_sessions
+        logs.get_active_sessions = lambda: [
+            {"pid": 7, "name": "the-cto"}, {"pid": 8, "name": "super-ui", "agentType": "CODEX"},
+        ]
+        try:
+            cache = logs.get_session_cache()
+        finally:
+            logs.get_active_sessions = orig
+        self.assertEqual(resolve_agent_type("the-cto", cache), "Claude")
+        self.assertEqual(resolve_agent_type("super-ui", cache), "CODEX")
+
+    def test_plain_header_omits_empty_badge(self):
+        out = format_thread_entry({"seq": 1, "ts": 0, "from": "rg", "content": "hi"}, use_color=False, session_cache={})
+        self.assertNotIn("[]", out)
+        self.assertIn("rg", out)
 
     def test_cache_entry_wins_over_name_pattern_guessing(self):
         cache = {"weird-codex-named-claude-session": {"type": "Claude"}}

@@ -187,6 +187,17 @@ def cmd_listen(args):
     )
     listener.run()
 
+def cmd_telegram(args):
+    """Lazy import keeps the Telegram code off every other command's startup path."""
+    from . import telegram_bridge
+
+    if args.print_chat_id:
+        sys.exit(telegram_bridge.print_chat_ids(args.env_file))
+    if not args.thread:
+        print("--thread is required (or set AGENT_PEER_TELEGRAM_THREAD).", file=sys.stderr)
+        sys.exit(2)
+    sys.exit(telegram_bridge.run(args.thread, args.name or telegram_bridge.DEFAULT_NAME, args.env_file))
+
 def cmd_inbox(args):
     session = args.session or os.environ.get("AGENT_PEER_NAME")
     if args.clear:
@@ -519,6 +530,14 @@ def main():
     p_listen.add_argument("--cwd", default=None, help="Working directory to register (default: the calling harness process's own cwd via lsof/procfs, not wherever this specific command happens to run - falls back to os.getcwd() if that's unavailable)")
     p_listen.add_argument("--force", action="store_true", help="Allow a second listener from this same harness session (default refuses, naming the already-running session instead of minting a '-2' dupe)")
     p_listen.set_defaults(func=cmd_listen)
+
+    # telegram
+    p_telegram = subparsers.add_parser("telegram", help="Bridge a shared thread to a Telegram chat, both directions (blocks until Ctrl+C)")
+    p_telegram.add_argument("--thread", default=os.environ.get("AGENT_PEER_TELEGRAM_THREAD"), metavar="ID", help="Thread to bridge (or $AGENT_PEER_TELEGRAM_THREAD)")
+    p_telegram.add_argument("--name", default=None, help="This bridge's identity in the thread (default: telegram-bridge)")
+    p_telegram.add_argument("--env-file", default=None, metavar="PATH", help="File with TELEGRAM_BOT_KEY, TELEGRAM_CHAT_ID (default: ~/.agent-peer/telegram.env)")
+    p_telegram.add_argument("--print-chat-id", action="store_true", help="Print chat and user ids with pending messages, then exit (message the bot once first)")
+    p_telegram.set_defaults(func=cmd_telegram)
 
     # inbox
     p_inbox = subparsers.add_parser("inbox", help="View received messages")

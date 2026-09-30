@@ -47,16 +47,16 @@ _BLACK_TEXT = "\033[38;5;232m"
 HARNESS_FG = {
     "CLAUDE": "\033[38;5;208m", "CODEX": "\033[38;5;39m",
     "AGY": "\033[38;5;141m", "MUSE": "\033[38;5;47m",
-    "PI": "\033[38;5;214m", "OPENCODE": "\033[38;5;80m",
+    "PI": "\033[38;5;214m", "OPENCODE": "\033[38;5;80m", "TELEGRAM": "\033[38;5;205m",
 }
 HARNESS_BG = {
     "CLAUDE": "\033[48;5;208m", "CODEX": "\033[48;5;39m",
     "AGY": "\033[48;5;141m", "MUSE": "\033[48;5;47m",
-    "PI": "\033[48;5;214m", "OPENCODE": "\033[48;5;80m",
+    "PI": "\033[48;5;214m", "OPENCODE": "\033[48;5;80m", "TELEGRAM": "\033[48;5;205m",
 }
 HARNESS_BADGE_TEXT = {
     "CLAUDE": _BLACK_TEXT, "CODEX": BRIGHT_WHITE, "AGY": _BLACK_TEXT,
-    "MUSE": _BLACK_TEXT, "PI": _BLACK_TEXT, "OPENCODE": _BLACK_TEXT,
+    "MUSE": _BLACK_TEXT, "PI": _BLACK_TEXT, "OPENCODE": _BLACK_TEXT, "TELEGRAM": _BLACK_TEXT,
 }
 YOU_BG = "\033[48;5;255m"
 YOU_FG = "\033[38;5;255m"
@@ -73,20 +73,19 @@ _NAME_PATTERN_TO_TYPE = (
     ("muse", "MUSE"),
     ("opencode", "OPENCODE"),
     ("omp", "PI"), ("pi", "PI"),
+    ("telegram", "TELEGRAM"),
 )
 
 
 def _infer_agent_type_from_name(name: str) -> str:
-    """Best-effort fallback when a session's own registration has no
-    explicit agentType - matches every harness_detect.py-known name prefix
-    (agy/codex/muse/pi-or-omp/opencode), not just agy, so a session missing
-    from the registry cache still gets a correctly-colored badge instead of
-    silently defaulting to Claude."""
+    """Name-pattern guess for a sender that is not registered (already left, or
+    a bridge that only posts). No pattern means no badge: an unknown name is
+    not evidence of Claude - registered Claude sessions are labelled by the cache."""
     clean = name.lower()
     for pattern, agent_type in _NAME_PATTERN_TO_TYPE:
         if pattern in clean:
             return agent_type
-    return "Claude"
+    return ""
 
 
 def get_session_cache() -> Dict[str, Dict[str, str]]:
@@ -97,7 +96,8 @@ def get_session_cache() -> Dict[str, Dict[str, str]]:
         for s in sessions:
             pid = s.get("pid")
             name = s.get("name") or f"pid-{pid}"
-            agent_type = s.get("agentType") or _infer_agent_type_from_name(name)
+            # Native Claude Code registrations carry no agentType; being registered is the evidence.
+            agent_type = s.get("agentType") or "Claude"
             info = {
                 "name": name,
                 "type": agent_type,
@@ -506,7 +506,8 @@ def format_thread_entry(
 
     if not use_color:
         you_badge = " (you)" if is_viewer else ""
-        header = f"[{resolve_agent_type(sender, session_cache or {})}] {sender}{you_badge}  {time_str}"
+        kind = resolve_agent_type(sender, session_cache or {})
+        header = f"{f'[{kind}] ' if kind else ''}{sender}{you_badge}  {time_str}"
         if urgency_tag:
             header += f"  {urgency_tag}"
         return f"\n{header}\n{body}  #{seq}\n"

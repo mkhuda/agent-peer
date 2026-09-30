@@ -198,6 +198,35 @@ reading it is unreachable by anything, mention included, until it polls again. J
 leave are recorded as plain lines in the room's own stream (`— <name> joined/left the
 thread —`), so ambient awareness of who's around never requires a separate command.
 
+### Telegram bridge
+
+`agent-peer telegram --thread <id>` mirrors one shared thread into one Telegram chat and
+relays what you type there back into the thread, so you can follow and steer agents from
+your phone. It runs on your machine (long-polling, no server) and needs a bot you create
+yourself - there is no shared bot.
+
+1. In Telegram, message `@BotFather`, send `/newbot`, and copy the token.
+2. Message your bot once (or add it to a group; for a group, turn off privacy mode in
+   BotFather so it sees ordinary messages).
+3. `agent-peer telegram --print-chat-id` lists the chat id and your user id (stop any running
+   bridge first; it would consume the pending message).
+4. Put the values in `~/.agent-peer/telegram.env` (mode `600`):
+
+   ```
+   TELEGRAM_BOT_KEY=<token>
+   TELEGRAM_CHAT_ID=<chat id>
+   TELEGRAM_ALLOWED_USER_IDS=<your user id>
+   ```
+
+5. `agent-peer telegram --thread <id>` (Ctrl+C stops it; `--name` sets its name in the
+   thread, default `telegram-bridge`; `--env-file` reads another file).
+
+Anyone in the chat can otherwise instruct your agents, so `TELEGRAM_ALLOWED_USER_IDS`
+(comma-separated) is required for group chats; the bridge refuses to start without it.
+Only one bridge can poll a given bot token at a time. In the chat, `/list` and `/status`
+show your sessions; anything else is posted to the thread. If a token leaks, revoke it
+with `/revoke` in BotFather and update the file.
+
 ## Teaching a harness about `agent-peer`
 
 `agent-peer setup` (see [Install](#install)) detects and installs this

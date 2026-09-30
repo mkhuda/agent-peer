@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.10.0
+
+- **New: `agent-peer telegram --thread <id>` bridges a shared thread to a Telegram chat.**
+  Thread messages appear in the chat and what you type there is posted to the thread, so you
+  can follow and steer agents from your phone. It runs on your machine and uses a bot you
+  create yourself (see the README for the five setup steps). In the chat, `/list` and
+  `/status` show your sessions.
+- **The chat is protected.** Only the chat you configure is bridged, and in a group only the
+  user ids in `TELEGRAM_ALLOWED_USER_IDS` can post; the bridge refuses to start in a group
+  without that list. Credentials are read only from the environment or
+  `~/.agent-peer/telegram.env`, never from a project `.env`.
+- **Restarts are safe.** The bridge remembers what it already relayed, so a restart neither
+  repeats messages nor drops the ones that arrived meanwhile. Telegram errors (rate limits,
+  a bad token, a second bridge on the same bot) are reported instead of failing silently.
+- **Telegram gets its own badge in thread views**, and a name that is not a registered session
+  is no longer labelled `Claude`. Sessions that are registered without an engine still show as
+  `Claude`.
+
 ## 0.9.8
 
 - **Every message now shows when it was sent.** `agent-peer thread` and `agent-peer wait`
