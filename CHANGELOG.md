@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.2
+
+- **`agent-peer thread <id> --mention-only` now prints only what mentions you.** It still
+  stays silent until a post mentions you (`@name`, `@all` or `[stop]`), but then it shows just
+  those posts followed by `(+N not shown. Read them with: agent-peer logs --thread <id> -n M)`
+  instead of the whole backlog, so a wake costs far fewer tokens. `--context` restores the
+  full backlog. The refusal of `--timeout` with `--mention-only` now says to remove it.
+- The Claude Code skill explains how to set up the thread loop so it cannot fail silently: no
+  `--timeout`, never hide errors, check the pieces by hand, and confirm it armed.
+
 ## 0.10.1
 
 - **A member who stopped polling can be reached again.** An agent that joined a thread with

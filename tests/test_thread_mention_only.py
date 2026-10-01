@@ -49,6 +49,7 @@ class MentionOnlyTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, out)
         for text in texts:
             self.assertIn(text, out)
+        return out
 
     def test_banter_does_not_wake_and_leaves_the_cursor_alone(self):
         proc = self._arm("--mention-only")
@@ -57,12 +58,32 @@ class MentionOnlyTest(unittest.TestCase):
         self.assertTrue(self._still_waiting(proc))
         self.assertEqual(self._cursor(), 0)
 
-    def test_a_mention_wakes_with_the_banter_before_it_as_context(self):
+    def test_a_mention_wakes_and_prints_only_the_mention_with_a_count_of_what_was_left_out(self):
         proc = self._arm("--mention-only")
         self._post("bob", "earlier banter")
         self._post("bob", "@agy-x over to you")
-        self._woke_with(proc, "earlier banter", "@agy-x over to you")
-        self.assertEqual(self._cursor(), 3)  # seq 1 is the room's own "joined" event
+        out = self._woke_with(proc, "@agy-x over to you")
+        self.assertNotIn("earlier banter", out)
+        self.assertIn("(+1 not shown. Read them with: agent-peer logs --thread t1 -n 3)", out)
+        self.assertEqual(self._cursor(), 3)  # seq 1 is the room's own "joined" event; the cursor passes the hidden post too
+
+    def test_no_note_when_nothing_was_left_out(self):
+        proc = self._arm("--mention-only")  # the room's own "joined" event stays unread but is not counted
+        self._post("bob", "@agy-x straight to you")
+        out = self._woke_with(proc, "@agy-x straight to you")
+        self.assertNotIn("not shown", out)
+
+    def test_context_flag_prints_every_unread_post(self):
+        proc = self._arm("--mention-only", "--context")
+        self._post("bob", "earlier banter")
+        self._post("bob", "@agy-x over to you")
+        out = self._woke_with(proc, "earlier banter", "@agy-x over to you")
+        self.assertNotIn("not shown", out)
+
+    def test_context_without_mention_only_is_refused(self):
+        out = run_cli(["thread", "t1", "--name", "agy-x", "--context"], self.home)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("--mention-only", out.stderr)
 
     def test_all_and_stop_wake_it(self):
         for text in ("@all heads up", "[stop] halt now"):
@@ -77,8 +98,9 @@ class MentionOnlyTest(unittest.TestCase):
         self._post("bob", "@agy-x you there")
         out = run_cli(["thread", "t1", "--name", "agy-x", "--mention-only"], self.home, timeout=5)
         self.assertEqual(out.returncode, 0, out.stderr)
-        self.assertIn("chat", out.stdout)
+        self.assertNotIn("chat", out.stdout.replace("not shown", ""))
         self.assertIn("@agy-x you there", out.stdout)
+        self.assertIn("+1 not shown", out.stdout)
 
     def test_a_mention_of_someone_else_or_inside_code_does_not_wake(self):
         proc = self._arm("--mention-only")
@@ -107,7 +129,24 @@ class MentionOnlyTest(unittest.TestCase):
     def test_combining_with_timeout_is_refused(self):
         out = run_cli(["thread", "t1", "--name", "agy-x", "--mention-only", "--timeout", "3"], self.home)
         self.assertEqual(out.returncode, 2)
-        self.assertIn("--timeout", out.stderr)
+        self.assertIn("remove --timeout", out.stderr)
+
+
+class SplitTest(unittest.TestCase):
+    def test_split_counts_real_posts_not_events_and_spans_the_whole_range(self):
+        from agent_peer.thread import split_for_mention_only
+
+        unread = [
+            {"seq": 4, "from": "system", "type": "event", "content": "x joined the thread"},
+            {"seq": 5, "from": "bob", "content": "banter"},
+            {"seq": 6, "from": "bob", "content": "@me please"},
+            {"seq": 7, "from": "carol", "content": "more banter"},
+            {"seq": 8, "from": "bob", "content": "[stop] now"},
+        ]
+        shown, hidden, span = split_for_mention_only(unread, "me")
+        self.assertEqual([m["seq"] for m in shown], [6, 8])
+        self.assertEqual(hidden, 2)
+        self.assertEqual(span, 5)
 
 
 if __name__ == "__main__":

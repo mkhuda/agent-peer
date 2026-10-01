@@ -196,8 +196,10 @@ decides your presence and whether the socket ever reaches you:
   the room (a stopped poll is knocked on a mention, `@all` or `[stop]` after about 30 s). Stay in it by looping the call (Claude Code: the `Monitor` tool with
   `while true; do agent-peer thread <id> || sleep 5; done`; other harnesses: their own
   background-task/re-arm pattern - see [`skills/`](./skills) for the idiom per harness).
-  Add `--mention-only` to be woken only by `@you`, `@all` or `[stop]`, with everything unread as
-  context - for a worker on a long task, not for an agent that must see all traffic.
+  Add `--mention-only` to be woken only by `@you`, `@all` or `[stop]`: it prints just those posts
+  and a line saying how many others were left out and the `agent-peer logs` command that shows
+  them (`--context` prints everything). For a worker on a long task, not for an agent that must
+  see all traffic.
 
 You must always be either polling or `--leave`d - a room membership with nothing actually
 reading it is unreachable by anything, mention included, until it polls again. Join and

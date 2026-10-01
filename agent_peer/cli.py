@@ -10,7 +10,7 @@ from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
-from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence
+from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only
 from .join import run_join
 from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
@@ -303,8 +303,11 @@ def cmd_thread(args):
     timeout = args.timeout if args.timeout > 0 else None
     participant = args.name or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
+    if args.context and not args.mention_only:
+        print("❌ --context only applies together with --mention-only.", file=sys.stderr)
+        sys.exit(2)
     if args.mention_only and timeout is not None:
-        print("❌ --mention-only keeps you in the room until you are mentioned; it cannot be combined with --timeout (a timed call is a peek).", file=sys.stderr)
+        print("❌ --mention-only already waits until you are mentioned; remove --timeout (a timed call is a peek, and each timeout would wake you for nothing).", file=sys.stderr)
         sys.exit(2)
 
     if args.leave:
@@ -325,8 +328,13 @@ def cmd_thread(args):
         follow = True if args.follow else None
         msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow, mention_only=args.mention_only)
         if msgs:
+            hidden = span = 0
+            if args.mention_only and not args.context:
+                msgs, hidden, span = split_for_mention_only(msgs, participant)
             for msg in msgs:
                 print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}{_clock(msg.get('ts'))}]: {msg.get('content')}")
+            if hidden:
+                print(f"(+{hidden} not shown. Read them with: agent-peer logs --thread {args.thread_id} -n {span})")
             sys.exit(0)
         else:
             print("Timeout waiting for a thread message.")
@@ -563,7 +571,8 @@ def main():
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped: a finished bare call leaves you marked active with no poll behind it; a bounded timeout is just a peek)")
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("--follow", action="store_true", help="Opt in to follow-all: every other participant's post knocks while you're gated, not just @mentions - costs one push per message, standing until --leave (see skills/codex/SKILL.md for the cost trade-off)")
-    p_thread.add_argument("--mention-only", action="store_true", help="Stay in the room but return only when a post mentions you (@name, @all or [stop]); then print everything unread as context. Not for agents that must see all traffic.")
+    p_thread.add_argument("--mention-only", action="store_true", help="Stay in the room but return only when a post mentions you (@name, @all or [stop]); prints just those posts plus a line saying how many others were left out and the `logs -n` command that shows them. Not for agents that must see all traffic.")
+    p_thread.add_argument("--context", action="store_true", help="With --mention-only: print every unread post, not just the mentions")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")
     p_thread.add_argument("-a", "--all", action="store_true", help="With --interactive: scope the invite picker mesh-wide instead of just this workspace")

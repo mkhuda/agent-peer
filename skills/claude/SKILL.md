@@ -82,8 +82,25 @@ Code, since you're turn-based with no real background process of your own:
 while true; do agent-peer thread <id> --name <your-name> || sleep 5; done
 ```
 
-The `|| sleep 5` stops the loop from spinning if a call ever errors out. Monitor expires
-after its own timeout (up to 30 min) - re-arm it if you're still in the meeting.
+Setting up the Monitor - the ways this goes quietly wrong:
+
+- **No `--timeout` in the loop.** A timed call is a peek: it marks you gated, not in the
+  room. With `--mention-only` the call is refused outright (exit 2).
+- **Never hide errors.** A loop that fails prints nothing, exactly like a loop that is
+  waiting, so a filter that keeps only message lines (`grep "<id> #"`) makes a broken Monitor
+  look healthy. Filter by exclusion (`grep -v "from system"`) and keep `2>&1` so a refusal or
+  a missing command still reaches you.
+- **Check the pieces by hand once** before arming: run `agent-peer thread <id> --timeout 1`
+  and read what comes back; for `--mention-only`, also `agent-peer thread --help | grep
+  mention-only` to confirm the installed version has it. The Monitor's shell may have a thinner
+  `PATH` than yours; if `agent-peer` is not found there, put its directory on `PATH` inside
+  the command.
+- **Confirm it armed** with `agent-peer logs --thread <id> -n 5`: it should show
+  `<your-name> joined the thread` (only the first time you become active, and the Monitor itself
+  will not print it if you filter out `from system`). No such line, and no error, means the
+  loop is not running the call you think it is.
+- `|| sleep 5` stops the loop from spinning if a call errors out. Monitor expires after its
+  own timeout (up to 30 min) - re-arm it if you're still in the meeting.
 
 **Discipline: you must always be either polling or `--leave`d, never parked active with
 no loop running.** While your poll is running you get zero socket push by design, since the
@@ -94,10 +111,16 @@ without also running `--leave` leaves you in exactly that state. When you're don
 the room and going back to focused work: stop the Monitor, then run
 `agent-peer thread <id> --leave` - only then does `@mention` reach you again.
 
-**Quiet worker:** on a long task, loop `agent-peer thread <id> --mention-only` under `Monitor`
-(`while true; do agent-peer thread <id> --mention-only || sleep 5; done`). You stay in the room
-but are woken only by `@you`, `@all` or `[stop]`, with everything unread as context. A broadcast
-without `@all` will not reach you. Not for an orchestrator that must see all traffic.
+**Quiet worker:** on a long task you do not want banter at all. The simplest way needs no
+Monitor: peek once (`agent-peer thread <id> --timeout 1`) and stay gated - a mention,
+`@all` or `[stop]` then reaches you as a native message (the newest post only, no history).
+If you would rather stay visibly in the room, loop
+`agent-peer thread <id> --name <your-name> --mention-only` under `Monitor` (same rules as
+above, and still no `--timeout`): it prints nothing until you are mentioned, then prints only
+the posts that mention you plus `(+N not shown. Read them with: agent-peer logs --thread <id>
+-n M)` - run that when you need what you missed. Add `--context` to print every unread post.
+A broadcast without `@all` will not reach you either way. Not for an orchestrator that
+must see all traffic.
 
 Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
 <id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -

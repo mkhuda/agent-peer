@@ -600,6 +600,15 @@ def get_thread_unread(thread_id: str, participant: str) -> List[Dict[str, Any]]:
     ]
 
 
+def split_for_mention_only(unread: List[Dict[str, Any]], participant: str) -> Tuple[List[Dict[str, Any]], int, int]:
+    """(posts that mention the participant, how many other real posts are left out,
+    how many records the thread's unread range spans - the `logs -n` value that shows it all)."""
+    shown = [m for m in unread if _mentions(m.get("content") or "", participant)]
+    hidden = sum(1 for m in unread if m not in shown and m.get("from") != "system")
+    span = unread[-1]["seq"] - unread[0]["seq"] + 1 if unread else 0
+    return shown, hidden, span
+
+
 def wait_for_thread_message(
     thread_id: str,
     participant: str,
