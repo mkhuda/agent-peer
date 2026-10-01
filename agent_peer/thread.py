@@ -30,6 +30,8 @@ from . import compat
 # A re-arm loop refreshes presence within seconds; past this an active member with a dead pid is deaf.
 ACTIVE_DEAD_GRACE_SECONDS = 30.0
 FANOUT_BUDGET_SECONDS = 3.0
+# agy native pushes read the conversation first (1.4-2 s on a long one); a short-lived poster must not cut them off.
+FANOUT_AGY_BUDGET_SECONDS = 6.0
 # Only a cap, not a fixed wait: the poster leaves as soon as its workers
 # finish. A `codex queue` is a separate process that must start and connect to
 # Codex's app-server; on a loaded machine that measured up to ~2.9s before the
@@ -195,7 +197,10 @@ def _strip_code_spans(content: str) -> str:
 def _mention_tokens(content: str):
     # Token-exact (not substring): "@codex-8763" must not match a session
     # literally named "codex-8763-2" in another project.
-    return set(re.findall(r"@([A-Za-z0-9_.\-]+)", _strip_code_spans(content)))
+    tokens = set(re.findall(r"@([A-Za-z0-9_.\-]+)", _strip_code_spans(content)))
+    # "ask @alice." ends a sentence: a trailing . or - is punctuation, so match the bare name too
+    # (the raw token stays, for a name that really contains dots).
+    return tokens | {t.rstrip(".-") for t in tokens if t.rstrip(".-")}
 
 
 def _mentions(content: str, name: str) -> bool:
@@ -272,16 +277,25 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     return targets
 
 
-def _push_one(name: str, pid: int, frame: str, sender: str):
+def _push_one(name: str, pid: int, frame: str, sender: str, native: bool = True):
     # Name first: presence pids belong to waiter/join processes, which are
     # never registered sessions - only the participant's listener is, and it
     # registers under this same name by convention. PID is a free fallback.
     for target in (name, str(pid)):
         try:
-            send_message(target, frame, from_name=sender)
+            send_message(target, frame, from_name=sender, native=native)
             return
         except Exception:
             continue  # a dead/unreachable target must never fail the poster
+
+
+def _agy_native_names() -> set:
+    """Names of live agy sessions that advertise a conversation (reachable through agy's language server)."""
+    try:
+        return {s.get("name") for s in get_active_sessions()
+                if str(s.get("agentType") or "").upper() == "AGY" and s.get("agyConversationId") and s.get("name")}
+    except Exception:
+        return set()
 
 
 def _codex_sessions() -> Dict[str, Optional[str]]:
@@ -386,10 +400,12 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         if not targets:
             return
         codex_sessions = _codex_sessions()
+        agy_names = _agy_native_names()
         registered = _registered_names()
         human = registered is not None and sender not in registered
         workers = []
         codex_workers = set()
+        agy_workers = set()
         for name, pid in targets:
             body, note = content, ""
             if name in codex_sessions:
@@ -407,14 +423,20 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
                 + (f"{note}\n" if note else "")
                 + f'(Reply in this thread: agent-peer send --thread {thread_id} "...")'
             )
-            worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender), daemon=True)
+            # An agy native push is a real user turn: only a mention, @all, [stop] or a human earns one;
+            # ordinary posts reaching a follow-all member go by socket (an inbox line, no turn).
+            native = not (name in agy_names and not human and not _mentions(content, name))
+            worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender, native), daemon=True)
             worker.start()
             workers.append(worker)
             if name in codex_sessions:
                 codex_workers.add(worker)
+            elif name in agy_names and native:
+                agy_workers.add(worker)
         started = time.time()
         for worker in workers:
-            limit = FANOUT_CODEX_BUDGET_SECONDS if worker in codex_workers else FANOUT_BUDGET_SECONDS
+            limit = (FANOUT_CODEX_BUDGET_SECONDS if worker in codex_workers
+                     else FANOUT_AGY_BUDGET_SECONDS if worker in agy_workers else FANOUT_BUDGET_SECONDS)
             remaining = started + limit - time.time()
             if remaining <= 0:
                 continue

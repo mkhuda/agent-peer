@@ -123,11 +123,14 @@ def _try_native(session: Dict, content: str, from_name: str, from_cwd, priority:
         to_name, to_pid = session.get("name"), session.get("pid")
         # Global audit log only: the target already holds this as a user turn, so a per-session
         # inbox copy would make its next `wait` return the same message again.
-        append_inbox({
-            "from": from_name, "from_cwd": from_cwd, "to": to_name, "to_pid": to_pid,
-            "priority": priority, "type": "user", "content": wire_content,
-            "raw": {"transport": result["transport"]},
-        })
+        try:
+            append_inbox({
+                "from": from_name, "from_cwd": from_cwd, "to": to_name, "to_pid": to_pid,
+                "priority": priority, "type": "user", "content": wire_content,
+                "raw": {"transport": result["transport"]},
+            })
+        except Exception:
+            pass  # delivered already; a failed audit line must never trigger a second delivery by socket
         return {
             "success": True, "target_pid": to_pid, "target_name": to_name,
             "target_socket": result["target"], "elapsed_ms": result["elapsed_ms"],
@@ -142,7 +145,8 @@ def send_message(
     content: str,
     priority: str = "now",
     from_name: str = "agent",
-    timeout: float = 5.0
+    timeout: float = 5.0,
+    native: bool = True
 ) -> Dict[str, Any]:
     """
     Send real-time peer message to target session.
@@ -162,7 +166,7 @@ def send_message(
     if session.get("agentType") == "CODEX" and codex_thread_id:
         return _send_via_codex_queue(session, codex_thread_id, content, from_name, from_cwd, priority)
 
-    delivered = _try_native(session, content, from_name, from_cwd, priority)
+    delivered = _try_native(session, content, from_name, from_cwd, priority) if native else None
     if delivered is not None:
         return delivered
 

@@ -102,6 +102,11 @@ class MentionOnlyTest(unittest.TestCase):
         self.assertIn("@agy-x you there", out.stdout)
         self.assertIn("+1 not shown", out.stdout)
 
+    def test_a_mention_ending_a_sentence_with_a_period_wakes(self):
+        proc = self._arm("--mention-only")
+        self._post("bob", "tolong cek ya @agy-x.")
+        self._woke_with(proc, "tolong cek ya @agy-x.")
+
     def test_a_mention_of_someone_else_or_inside_code_does_not_wake(self):
         proc = self._arm("--mention-only")
         self._post("bob", "@carol please look")

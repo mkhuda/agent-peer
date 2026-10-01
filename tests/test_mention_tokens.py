@@ -109,5 +109,31 @@ class UnclosedFencePolicyTest(unittest.TestCase):
         self.assertEqual(_mention_tokens(f"@alice see this:\n{BT3}\nsome code"), {"alice"})
 
 
+class MentionPunctuationTest(unittest.TestCase):
+    def test_a_sentence_ending_punctuation_does_not_hide_the_mention(self):
+        for text in ("tolong cek ya @alice.", "@alice.\nbaris kedua", "kerjakan @alice-", "ping @alice...", "@alice. @bob."):
+            self.assertTrue(_mentions(text, "alice"), text)
+        self.assertTrue(_mentions("sudah selesai @bob.", "bob"))
+
+    def test_all_with_a_trailing_period_still_reaches_everyone(self):
+        self.assertTrue(_mentions("semua perhatian @all.", "alice"))
+
+    def test_a_name_that_really_contains_dots_still_matches_with_and_without_a_trailing_period(self):
+        name = "muse-bin-1.3.0-R3401.1-31762"
+        self.assertTrue(_mentions(f"@{name} tolong", name))
+        self.assertTrue(_mentions(f"tolong @{name}.", name))
+
+    def test_it_does_not_widen_the_match_to_other_names(self):
+        self.assertFalse(_mentions("@alice-2. tolong", "alice"))
+        self.assertFalse(_mentions("hubungi foo@alice.com", "alice"))
+        self.assertFalse(_mentions("@alicia.", "alice"))
+
+    def test_a_period_inside_a_code_span_is_still_not_a_mention(self):
+        self.assertFalse(_mentions("contoh `@alice.` saja", "alice"))
+
+    def test_existing_token_sets_are_unchanged_when_there_is_no_trailing_punctuation(self):
+        self.assertEqual(_mention_tokens("@alice hi @bob"), {"alice", "bob"})
+
+
 if __name__ == "__main__":
     unittest.main()

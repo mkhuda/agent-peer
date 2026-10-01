@@ -26,7 +26,7 @@ TOKEN = "secret-csrf-token-value"
 class FakeLS:
     """Stdlib stand-in for the Language Server: checks the CSRF header, records requests."""
 
-    def __init__(self, model="MODEL_X", fail_send=False):
+    def __init__(self, model="MODEL_X", fail_send=False, trajectory_delay=0.0):
         self.requests = []
         outer = self
 
@@ -40,6 +40,7 @@ class FakeLS:
                 if self.headers.get("x-codeium-csrf-token") != TOKEN:
                     return self._reply(401, {"code": "unauthenticated"})
                 if self.path.endswith("/GetCascadeTrajectory"):
+                    time.sleep(trajectory_delay)
                     traj = {"trajectory": {"generatorMetadata": [{"chatModel": {"model": model}}]}} if model else {}
                     return self._reply(200, traj)
                 if self.path.endswith("/SendUserCascadeMessage"):
@@ -218,6 +219,15 @@ class SenderHookTest(AgyLsTestBase):
         (_, _, body), = self.ls.sent()
         self.assertTrue(body["items"][0]["text"].rstrip().endswith("approval for anything that needs it.)"))
 
+    def test_a_failed_audit_line_after_a_delivery_does_not_turn_it_into_a_second_delivery(self):
+        from agent_peer import sender
+
+        self._register()
+        with mock.patch.object(sender, "append_inbox", side_effect=OSError("disk full")):
+            result = sender._try_native(self.session, "hello", "boss", "/w", "now")
+        self.assertIsNotNone(result)
+        self.assertEqual(len(self.ls.sent()), 1)
+
     def test_other_harnesses_take_the_generic_path_and_never_load_the_agy_module(self):
         code = (
             "import sys; from agent_peer import sender;"
@@ -253,8 +263,8 @@ class IdentityTest(unittest.TestCase):
             return native.session_name_from_env(env)
 
     def test_a_resumed_conversation_gets_its_earlier_name_back(self):
-        sessions = [{"name": "agent-peer-agy", agy_ls.REGISTRY_FIELD: CONV, "alive": False, "startedAt": 5}]
-        self.assertEqual(self._name(sessions, _env("127.0.0.1:1")), "agent-peer-agy")
+        sessions = [{"name": "zz-test-agy-resume", agy_ls.REGISTRY_FIELD: CONV, "alive": False, "startedAt": 5}]
+        self.assertEqual(self._name(sessions, _env("127.0.0.1:1")), "zz-test-agy-resume")
 
     def test_prefers_a_live_registration_over_a_dead_one(self):
         sessions = [
@@ -277,13 +287,13 @@ class RememberedNameTest(AgyLsTestBase):
             return native.session_name_from_env(env or _env(self.ls.addr))
 
     def test_name_survives_a_clean_exit_that_unregistered_the_session(self):
-        agy_ls.remember_name(_env(self.ls.addr), "agent-peer-agy")
-        self.assertEqual(agy_ls.remembered_name(_env(self.ls.addr)), "agent-peer-agy")
-        self.assertEqual(self._name([]), "agent-peer-agy")
+        agy_ls.remember_name(_env(self.ls.addr), "zz-test-agy-resume")
+        self.assertEqual(agy_ls.remembered_name(_env(self.ls.addr)), "zz-test-agy-resume")
+        self.assertEqual(self._name([]), "zz-test-agy-resume")
 
     def test_a_remembered_name_now_held_by_a_live_session_is_not_taken(self):
-        agy_ls.remember_name(_env(self.ls.addr), "agent-peer-agy")
-        other = [{"name": "agent-peer-agy", "alive": True, agy_ls.REGISTRY_FIELD: "11111111-1111-1111-1111-111111111111"}]
+        agy_ls.remember_name(_env(self.ls.addr), "zz-test-agy-resume")
+        other = [{"name": "zz-test-agy-resume", "alive": True, agy_ls.REGISTRY_FIELD: "11111111-1111-1111-1111-111111111111"}]
         self.assertIsNone(self._name(other))
 
     def test_a_registration_wins_over_the_remembered_name(self):
@@ -298,8 +308,88 @@ class RememberedNameTest(AgyLsTestBase):
         self.assertIsNone(self._name([], {}))
 
 
-class ListenEndToEndTest(unittest.TestCase):
-    """`agent-peer listen` in an agy-like process registers the conversation."""
+class FallbackAndCacheTest(AgyLsTestBase):
+    def _log(self):
+        path = os.path.join(agy_ls._endpoints_dir(), "last-fallback.log")
+        return open(path).read() if os.path.exists(path) else ""
+
+    def _calls(self):
+        calls = []
+        real = agy_ls._rpc
+
+        def spy(endpoint, method, body, timeout=5.0):
+            calls.append((method, timeout))
+            return real(endpoint, method, body, timeout)
+
+        return calls, mock.patch.object(agy_ls, "_rpc", spy)
+
+    def test_the_history_read_gets_a_long_timeout_and_the_send_a_short_one(self):
+        self._register()
+        calls, patch = self._calls()
+        with patch:
+            agy_ls.send(self.session, "hi")
+        self.assertEqual(calls, [("GetCascadeTrajectory", 15.0), ("SendUserCascadeMessage", 5.0)])
+
+    def test_a_missing_endpoint_is_recorded_without_any_secret(self):
+        self.assertIsNone(agy_ls.send(self.session, "hi"))
+        self.assertIn("stage=endpoint", self._log())
+
+    def test_a_failed_send_and_a_missing_model_are_recorded_with_their_cause(self):
+        for kwargs, expected in (({"fail_send": True}, "stage=send reason=HTTPError http=500"), ({"model": None}, "stage=model")):
+            ls = FakeLS(**kwargs)
+            self.addCleanup(ls.close)
+            agy_ls.listen_info(_env(ls.addr))
+            agy_ls.send(self.session, "hi")
+            self.assertIn(expected, self._log())
+        log = self._log()
+        self.assertNotIn(TOKEN, log)
+        self.assertNotIn("hi\n", log)
+        self.assertEqual(stat.S_IMODE(os.stat(os.path.join(agy_ls._endpoints_dir(), "last-fallback.log")).st_mode), 0o600)
+
+    def test_nothing_is_recorded_when_the_door_is_simply_off_or_unadvertised(self):
+        self._register()
+        with mock.patch.dict(os.environ, {agy_ls.OFF_SWITCH_ENV: "0"}):
+            agy_ls.send(self.session, "hi")
+        agy_ls.send({k: v for k, v in self.session.items() if k != agy_ls.REGISTRY_FIELD}, "hi")
+        self.assertEqual(self._log(), "")
+
+    def test_the_log_keeps_only_the_latest_lines(self):
+        for _ in range(agy_ls._FALLBACK_LOG_LINES + 20):
+            agy_ls.note_fallback(CONV, "send")
+        self.assertEqual(len(self._log().splitlines()), agy_ls._FALLBACK_LOG_LINES)
+
+    def test_the_model_is_read_once_per_minute_per_ls_address(self):
+        self._register()
+        agy_ls.send(self.session, "one")
+        agy_ls.send(self.session, "two")
+        self.assertEqual(sum(1 for r in self.ls.requests if r[0].endswith("/GetCascadeTrajectory")), 1)
+        with mock.patch.object(agy_ls.time, "time", return_value=time.time() + agy_ls._MODEL_CACHE_SECONDS + 1):
+            agy_ls.send(self.session, "three")
+        self.assertEqual(sum(1 for r in self.ls.requests if r[0].endswith("/GetCascadeTrajectory")), 2)
+        other = FakeLS(model="MODEL_Y")  # the LS restarted: a new address must not reuse the old model
+        self.addCleanup(other.close)
+        agy_ls.listen_info(_env(other.addr))
+        agy_ls.send(self.session, "four")
+        self.assertEqual(other.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_Y")
+
+    def test_a_configured_proxy_is_never_used_for_the_loopback_server(self):
+        self._register()
+        refused = {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9", "no_proxy": "", "NO_PROXY": ""}
+        with mock.patch.dict(os.environ, refused):
+            self.assertIsNotNone(agy_ls.send(self.session, "via a proxy that would refuse"))
+        self.assertEqual(len(self.ls.sent()), 1)
+
+    def test_pruning_stale_endpoints_leaves_the_model_cache_alone(self):
+        self._register()
+        agy_ls.send(self.session, "hi")
+        cache = agy_ls._model_cache_path(CONV)
+        self.assertTrue(os.path.exists(cache))
+        agy_ls.listen_info(_env(self.ls.addr))
+        self.assertTrue(os.path.exists(cache))
+
+
+class _ListenHarness(unittest.TestCase):
+    """Real `agent-peer listen` processes that believe they run inside agy (no tests of its own)."""
 
     def setUp(self):
         self._cm = isolated_home()
@@ -321,6 +411,12 @@ class ListenEndToEndTest(unittest.TestCase):
         for proc in self.procs:
             proc.kill()
             proc.wait()
+        for session in self._sessions():
+            link = os.path.join("/tmp/cc-socks", f"{session.get('name')}.sock")
+            if str(session.get("name", "")).startswith("zz-test-"):
+                for leftover in (link, session.get("messagingSocketPath")):
+                    if leftover and (os.path.islink(leftover) or os.path.exists(leftover)):
+                        os.unlink(leftover)
         self.ls.close()
         self._cm.__exit__(None, None, None)
 
@@ -336,31 +432,84 @@ class ListenEndToEndTest(unittest.TestCase):
                         "listener never registered")
         return next(s for s in self._sessions() if s["pid"] not in before)
 
+
+class ListenEndToEndTest(_ListenHarness):
+    """`agent-peer listen` in an agy-like process registers the conversation."""
+
     def test_registers_the_conversation_without_putting_the_token_in_the_registry(self):
-        session = self._listen("--name", "agy-e2e")
+        session = self._listen("--name", "zz-test-agy-e2e")
         self.assertEqual(session["agentType"], "AGY")
         self.assertEqual(session[agy_ls.REGISTRY_FIELD], CONV)
         self.assertNotIn(TOKEN, json.dumps(session))
         endpoint = os.path.join(self.home, ".agent-peer", "agy-ls", CONV + ".json")
         self.assertEqual(stat.S_IMODE(os.stat(endpoint).st_mode), 0o600)
         listing = run_cli(["list"], self.home).stdout
-        self.assertIn("agy-e2e", listing)
+        self.assertIn("zz-test-agy-e2e", listing)
         self.assertNotIn(TOKEN, listing)
 
     def test_a_clean_exit_then_a_listen_without_a_name_restores_the_name(self):
-        first = self._listen("--name", "agent-peer-agy")
+        first = self._listen("--name", "zz-test-agy-resume")
         self.procs[0].terminate()  # normal stop: the registration is removed
         self.procs[0].wait()
         self.assertFalse([s for s in self._sessions() if s["pid"] == first["pid"]])
         second = self._listen()
-        self.assertEqual(second["name"], "agent-peer-agy")
+        self.assertEqual(second["name"], "zz-test-agy-resume")
 
     def test_a_resumed_agy_keeps_its_name_without_being_told(self):
-        first = self._listen("--name", "agent-peer-agy")
+        first = self._listen("--name", "zz-test-agy-resume")
         os.kill(first["pid"], 9)  # killed, so its registration stays behind like after a crash
         self.procs[0].wait()
         second = self._listen()
-        self.assertEqual(second["name"], "agent-peer-agy")
+        self.assertEqual(second["name"], "zz-test-agy-resume")
+
+
+class AgyThreadPushTest(_ListenHarness):
+    """Thread knocks reach an agy through its language server - for who deserves a turn, and in time."""
+
+    def _post(self, text, sender="huda"):
+        return run_cli(["send", "--thread", "t1", "--sender", sender, text], self.home, timeout=30)
+
+    def _join(self, name, *flags):
+        run_cli(["thread", "t1", "--name", name, "--timeout", "1", *flags], self.home)
+
+    def _sent(self, expected, timeout=8):
+        return wait_until(lambda: len(self.ls.sent()) >= expected, timeout=timeout)
+
+    def test_a_mention_reaches_a_gated_agy_natively(self):
+        self._listen("--name", "zz-test-agy-t")
+        self._join("zz-test-agy-t")
+        self._post("@zz-test-agy-t please look")
+        self.assertTrue(self._sent(1))
+        self.assertIn("@zz-test-agy-t please look", self.ls.sent()[0][2]["items"][0]["text"])
+
+    def test_ordinary_posts_to_a_follow_all_agy_from_another_agent_go_by_socket_not_as_a_turn(self):
+        self._listen("--name", "zz-test-agy-t")
+        self._listen("--name", "zz-test-bob")
+        self._join("zz-test-agy-t", "--follow")
+        self._post("just chatting", sender="zz-test-bob")
+        time.sleep(2)
+        self.assertEqual(self.ls.sent(), [])
+
+    def test_a_human_post_to_a_follow_all_agy_does_earn_a_turn(self):
+        self._listen("--name", "zz-test-agy-t")
+        self._join("zz-test-agy-t", "--follow")
+        self._post("hello from a person")
+        self.assertTrue(self._sent(1))
+
+    def test_a_mention_from_another_agent_to_a_follow_all_agy_does_earn_a_turn(self):
+        self._listen("--name", "zz-test-agy-t")
+        self._listen("--name", "zz-test-bob")
+        self._join("zz-test-agy-t", "--follow")
+        self._post("@zz-test-agy-t over to you", sender="zz-test-bob")
+        self.assertTrue(self._sent(1))
+
+    def test_a_slow_history_read_does_not_make_the_short_lived_poster_drop_the_push(self):
+        self.ls.close()
+        self.ls = FakeLS(trajectory_delay=4.0)  # longer than the old 3 s budget, shorter than the new 6 s one
+        self._listen("--name", "zz-test-agy-t")
+        self._join("zz-test-agy-t")
+        self._post("@zz-test-agy-t please look")
+        self.assertEqual(len(self.ls.sent()), 1, "the poster exited before the push finished")
 
 
 if __name__ == "__main__":

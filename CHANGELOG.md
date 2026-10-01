@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.11.2
+
+- **A thread mention now reaches an Antigravity session natively from a long-running `join`.** The fanout waits
+  longer for agy (6s instead of 3s), the model lookup is cached for a minute and has its own timeouts, and calls to
+  the local language server never go through a proxy.
+- On an agy thread that follows everything, only a mention, `@all`, `[stop]` or a human message is delivered
+  natively; other traffic stays on the poll path, so a busy room no longer starts a turn per message.
+- A mention followed by a period or a dash (`@name.`) is recognised.
+- When native delivery falls back to the socket path, the reason is written to
+  `~/.agent-peer/agy-ls/last-fallback.log`.
+- A failure while writing the delivery audit no longer sends the same message twice.
+
 ## 0.11.1
 
 - **A machine without Claude Code no longer looks like it has it.** Commands other than `listen` no longer create

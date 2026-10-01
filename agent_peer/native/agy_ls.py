@@ -22,6 +22,10 @@ _ENV_ADDRESS = "ANTIGRAVITY_LS_ADDRESS"
 _ENV_TOKEN = "ANTIGRAVITY_CSRF_TOKEN"
 _ENV_CONVERSATION = "ANTIGRAVITY_CONVERSATION_ID"
 _SERVICE = "exa.language_server_pb.LanguageServerService"
+_MODEL_LOOKUP_TIMEOUT = 15.0  # GetCascadeTrajectory carries the whole history, 1.4-2 s on a long conversation
+_SEND_TIMEOUT = 5.0
+_MODEL_CACHE_SECONDS = 60.0  # a model switched inside this window is picked up one turn late
+_FALLBACK_LOG_LINES = 50
 _ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
@@ -88,6 +92,8 @@ def remembered_name(env: Mapping[str, str]) -> Optional[str]:
 
 def _prune_stale(directory: str) -> None:
     for name in os.listdir(directory):
+        if not name.endswith(".json"):
+            continue
         path = os.path.join(directory, name)
         try:
             with open(path, "r", encoding="utf-8") as f:
@@ -135,12 +141,16 @@ def _read_endpoint(conversation: str) -> Optional[Dict[str, Any]]:
     return endpoint
 
 
+# The server is on loopback: never send it through an environment or system proxy (a VPN can switch one on).
+_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 def _rpc(endpoint: Dict[str, Any], method: str, body: Dict[str, Any], timeout: float = 5.0) -> Dict[str, Any]:
     request = urllib.request.Request(
         f"http://{endpoint['addr']}/{_SERVICE}/{method}", data=json.dumps(body).encode("utf-8"), method="POST",
         headers={"Content-Type": "application/json", "x-codeium-csrf-token": endpoint["token"]})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:
+        with _LOCAL_OPENER.open(request, timeout=timeout) as response:
             raw = response.read().decode("utf-8")
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
@@ -164,13 +174,67 @@ def _find(obj: Any, key: str) -> Any:
     return None
 
 
+def note_fallback(conversation: str, stage: str, exc: Optional[BaseException] = None, started: Optional[float] = None) -> None:
+    """One line saying why the native door was not used (no token, no message text); best effort."""
+    try:
+        directory = _endpoints_dir()
+        os.makedirs(directory, exist_ok=True)
+        path = os.path.join(directory, "last-fallback.log")
+        reason = type(exc).__name__ if exc else "none"
+        code = getattr(exc, "code", "")
+        took = f" after {time.time() - started:.1f}s" if started else ""
+        line = f"{time.strftime('%H:%M:%S')} {conversation[:8]} stage={stage} reason={reason}{(' http=' + str(code)) if code else ''}{took}"
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                lines = f.read().splitlines()
+        except OSError:
+            lines = []
+        tmp = f"{path}.tmp.{os.getpid()}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write("\n".join((lines + [line])[-_FALLBACK_LOG_LINES:]) + "\n")
+        os.replace(tmp, path)
+    except OSError:
+        pass
+
+
+def _model_cache_path(conversation: str) -> str:
+    return os.path.join(_endpoints_dir(), f"{conversation}.model")
+
+
+def _cached_model(endpoint: Dict[str, Any], conversation: str) -> Optional[str]:
+    try:
+        with open(_model_cache_path(conversation), "r", encoding="utf-8") as f:
+            cached = json.load(f)
+        if (cached.get("addr") == endpoint.get("addr") and isinstance(cached.get("model"), str)
+                and 0 <= time.time() - float(cached.get("at", 0)) < _MODEL_CACHE_SECONDS):
+            return cached["model"]
+    except (OSError, ValueError, AttributeError, TypeError):
+        pass
+    return None
+
+
 def _conversation_model(endpoint: Dict[str, Any], conversation: str) -> Optional[str]:
-    """The conversation's own model enum; its names change per agy version, so never hardcoded."""
-    trajectory = _rpc(endpoint, "GetCascadeTrajectory", {"cascadeId": conversation})
+    """The conversation's own model enum; its names change per agy version, so never hardcoded.
+    Cached briefly per conversation and LS address: the lookup reads the whole history."""
+    cached = _cached_model(endpoint, conversation)
+    if cached:
+        return cached
+    trajectory = _rpc(endpoint, "GetCascadeTrajectory", {"cascadeId": conversation}, _MODEL_LOOKUP_TIMEOUT)
     chat_model = _find(trajectory, "chatModel")
     candidates = [chat_model.get("model") if isinstance(chat_model, dict) else chat_model,
                   _find(trajectory, "generatorModel"), _find(trajectory, "planModel")]
-    return next((c for c in candidates if isinstance(c, str) and c), None)
+    model = next((c for c in candidates if isinstance(c, str) and c), None)
+    if model:
+        try:
+            tmp = f"{_model_cache_path(conversation)}.tmp.{os.getpid()}"
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump({"model": model, "addr": endpoint.get("addr"), "at": time.time()}, f)
+            os.replace(tmp, _model_cache_path(conversation))
+        except OSError:
+            pass
+    return model
 
 
 def send(session: Dict[str, Any], wire_content: str) -> Optional[Dict[str, Any]]:
@@ -184,19 +248,24 @@ def send(session: Dict[str, Any], wire_content: str) -> Optional[Dict[str, Any]]
         return None
     endpoint = _read_endpoint(conversation)
     if endpoint is None:
+        note_fallback(conversation, "endpoint")
         return None
     started = time.time()
+    stage = "model"
     try:
         model = _conversation_model(endpoint, conversation)
         if not model:
+            note_fallback(conversation, "model", started=started)
             return None
+        stage = "send"
         _rpc(endpoint, "SendUserCascadeMessage", {
             "cascadeId": conversation,
             "items": [{"text": wire_content}],
             "messageOrigin": "MESSAGE_ORIGIN_SDK_EXECUTABLE",
             "cascadeConfig": {"plannerConfig": {"requestedModel": {"model": model}}},
-        })
-    except Exception:
+        }, _SEND_TIMEOUT)
+    except Exception as exc:
+        note_fallback(conversation, stage, exc, started)
         return None
     return {"transport": "agy-ls", "target": f"agy-ls:{conversation}",
             "elapsed_ms": round((time.time() - started) * 1000, 2)}
