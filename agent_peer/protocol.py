@@ -39,7 +39,6 @@ def ensure_dirs():
             compat.secure_dir(d)
     if not compat.IS_WINDOWS:
         os.makedirs(SOCKET_DIR, exist_ok=True)
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
 
 def get_session_inbox_path(session_id_or_name: str) -> str:
     ensure_dirs()

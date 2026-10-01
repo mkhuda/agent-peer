@@ -16,6 +16,8 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 
 **`agent-peer listen` must run before `agent-peer wait`, every session, no exceptions.** `wait` only reads an inbox `listen` creates - calling `wait` first means nobody could ever `send` to you, so it now refuses immediately (exit 1) instead of blocking forever for a message that can never arrive.
 
+**Golden rule (agent-peer 0.11.0+):** run `agent-peer listen` once at the start of the session. While every peer you talk to is on 0.11.0+, you never need `agent-peer wait`. To take part in a thread, run `agent-peer thread <id> --timeout 1` once (join and stay gated): from then on you are woken only when you are mentioned.
+
 <CRITICAL_INVARIANT>
 STANDBY DISCIPLINE (Antigravity):
 - **With `agent-peer listen` running from agent-peer 0.11.0 or later you are reached natively.** A direct message, or a thread mention, arrives as an ordinary user turn through your own language server - at once if you are idle, at your next step if you are working. **You do not need `wait` or any background waiter to receive messages.** (Muse, Pi, OpenCode have no native push; they keep a waiter.)
@@ -47,7 +49,7 @@ Before finalizing any response during multi-agent collaboration:
 | `agent-peer list` | Discover all active Claude Code and Antigravity peer sessions on this machine |
 | `agent-peer list --cwd <substring>` | Narrow the list to sessions whose working directory matches (e.g. one project) |
 | `agent-peer send <peer> "<msg>"` | Send an instant real-time message to a peer by name or PID |
-| `agent-peer listen` | Start background listener and register session in `~/.claude/sessions/` — no `--name` needed, auto-detects a stable session name from your own process (e.g. `agy-<pid>`) |
+| `agent-peer listen` | Start background listener and register session in `~/.claude/sessions/` — no `--name` needed: the name comes from your own process and, on 0.11.0+, is remembered per conversation, so it stays the same after a restart or `agy --conversation=<id>` resume |
 | `agent-peer inbox [--name <name>]` | View recent messages received (globally or isolated to session) |
 | `agent-peer wait` | Reactively wait for peer messages — returns any already-queued backlog instantly (merged, not just the latest one), or blocks until the next arrival, then exit 0. No `--name` needed, auto-detects your session. |
 | `agent-peer logs [-w] [-n 20] [-q <query>]` | View beautifully formatted full message logs directly in terminal |
@@ -67,7 +69,7 @@ When a task involves peer collaboration:
    agent-peer list
    ```
 2. If your session is not yet listening, start it as a background task:
-   - Use `run_command` with `agent-peer listen`, **leaving `--name` off entirely**. Auto-detection gives each session its own stable name tied to your actual process (e.g. `agy-<pid>`), so distinct sessions never collide or pile up under the same name.
+   - Use `run_command` with `agent-peer listen`, **leaving `--name` off entirely**. Auto-detection gives each session its own name tied to your actual process (e.g. `agy-<pid>`); on 0.11.0+ it is remembered per conversation, so a restart or resume of the same conversation gets the same name back, and distinct sessions never collide.
    - This creates `/tmp/cc-socks/<pid>.sock` and registers the session in `~/.claude/sessions/`.
    - If a session shows `ALIVE: no` in `agent-peer list`, its process is confirmed dead (e.g. killed with `Ctrl+C`, which can `SIGKILL` a background child and skip its own cleanup) — run `agent-peer prune` to remove that leftover registration.
    - If it still shows `ALIVE: yes` but is clearly no longer relevant (e.g. a duplicate `-2`/`-3` name), that's a separate known issue — leave it, don't try to kill other sessions' processes.
@@ -120,19 +122,19 @@ blocks until there's an unread message, prints it, and exits.
 - **Reply** to any message framed `[thread: <id> ...]` with `agent-peer send --thread <id> "..."`.
 - **On 0.11.0+, taking part after joining needs no background loop and no `wait`:** a mention, `@all` or `[stop]` is injected as a new user turn, even while you are working (you handle it at your next step, then carry on).
 
-- **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - you won't get
-  bombed with banter while doing other work. An explicit `@your-name`/`@all`/`[stop]`
+- **`--timeout N` (peek) - the default for you.** A quick backlog check that leaves you gated
+  (`left: true`): you won't get bombed with banter while doing other work. An explicit `@your-name`/`@all`/`[stop]`
   still reaches you while you're gated: as a user turn through the language server when the
   poster is on 0.11.0+, otherwise into your inbox (surfaced by `wait`).
-- **No `--timeout` (active room member):** run it as a background task, same pattern as
-  `wait`, and re-run it each time it returns - that loop IS your presence in the room.
-  Active members get **zero socket push, not even on mention** - the room stream (your
-  own background-task loop) is the only speaker inside the room; a message only reaches
-  you if that loop is actually running.
-- **`agent-peer thread <id> --leave`:** step out - gated from banter, still reachable by
-  `@mention`/`@all`/`[stop]`. **You must always be either running the background-task loop
-  or explicitly left - never marked active with no loop behind it, since an active member who stopped polling is knocked only by a
-  mention, `@all` or `[stop]` after ~30 s, never by banter.**
+- **No `--timeout` (active room member) - optional, only to follow every post.** Run it as a
+  background task and re-run it each time it returns - that loop IS your presence in the room.
+  While that loop runs you get **zero socket push, not even on mention**: the room stream (your own
+  loop) is the only way a post reaches you. You do not need this to be reachable; skip it unless
+  you want to read all the banter.
+- **`agent-peer thread <id> --leave`:** step out when you are done with the room; you stay
+  reachable by `@mention`/`@all`/`[stop]`. **The one state to avoid is being marked active (a
+  bare `thread <id>`, no `--timeout`) with no loop behind it:** an active member who stopped
+  polling is knocked only by a mention, `@all` or `[stop]` after ~30 s, never by banter.
 
 **Details.** The push finds you by name, so your thread name must be your listener's name (it is, when
 you use no `--name` or the same one). A user turn carries only the newest post - peek again
@@ -148,5 +150,5 @@ Your own posts are filtered out of what `thread <id>` returns to you. `agent-pee
 you keep using the pattern above instead. Reply routing: a message framed
 `[thread: <id> ...]` MUST be answered with `agent-peer send --thread <id> "..."`, never a
 1-to-1 `send` to whoever posted it. New to a thread? Read its backlog once first
-(`agent-peer thread <id> --timeout 1` or `agent-peer logs --thread <id>`) - a socket
-knock (while gated) carries only the newest message, never history.
+(`agent-peer thread <id> --timeout 1` or `agent-peer logs --thread <id>`) - a mention that
+reaches you while gated carries only the newest post, never the history.

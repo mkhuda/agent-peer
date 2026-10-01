@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.11.1
+
+- **A machine without Claude Code no longer looks like it has it.** Commands other than `listen` no longer create
+  `~/.claude`, and `agent-peer setup` ignores a `~/.claude` that holds only the `sessions` folder `listen` creates,
+  so `setup --all` no longer installs a Claude skill and rules for a Claude Code that is not there. (A `listen` on
+  such a machine still creates that folder until agent-peer keeps its own session registry.)
+- The Antigravity skill is clearer: a golden rule at the top, joining a thread once as the default, the active loop
+  marked optional, and how the name is kept across a resume.
+
 ## 0.11.0
 
 - **Antigravity (agy) is now reachable without `wait`.** A session that runs `agent-peer listen`

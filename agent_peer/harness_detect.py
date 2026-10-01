@@ -94,9 +94,19 @@ def detect_opencode(home=None):
 
 
 def detect_claude(home=None):
-    # No documented env var marks "inside Claude Code", so ~/.claude existing
-    # covers both the in-harness and standalone-CLI cases from 0022's table.
-    return _which_or_dir("claude", (".claude",), _home_dir(home))
+    # No documented env var marks "inside Claude Code", so a populated ~/.claude covers both the
+    # in-harness and standalone-CLI cases. `agent-peer listen` itself creates ~/.claude/sessions on a
+    # machine without Claude Code; a directory holding only that is not an installation.
+    found = shutil.which("claude")
+    if found:
+        return True, found
+    claude_dir = os.path.join(_home_dir(home), ".claude")
+    try:
+        if any(entry != "sessions" for entry in os.listdir(claude_dir)):
+            return True, claude_dir
+    except OSError:
+        pass
+    return False, ""
 
 
 _DETECTORS = {

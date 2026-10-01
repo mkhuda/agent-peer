@@ -67,6 +67,7 @@ class PeerListener:
 
     def setup(self):
         ensure_dirs()
+        os.makedirs(SESSIONS_DIR, exist_ok=True)  # only a registering listener may create Claude's directory
         proc_start = get_proc_start(self.pid)
         now_ms = int(time.time() * 1000)
 
