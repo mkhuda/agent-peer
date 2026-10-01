@@ -36,10 +36,12 @@ def _socket_address(identifier: str) -> str:
     return os.path.join(SOCKET_DIR, f"{identifier}.sock")
 
 class PeerListener:
-    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False, harness_pid: Optional[int] = None):
+    def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False, harness_pid: Optional[int] = None, extra_registration: Optional[dict] = None, on_registered=None):
         self.name = name
         self.agent_type = agent_type or "AGENT"
         self.codex_thread_id = codex_thread_id
+        self.extra_registration = extra_registration or {}
+        self.on_registered = on_registered
         self.force = force
         self.harness_uid = harness_session_uid()
         self.pid = os.getpid()
@@ -170,7 +172,11 @@ class PeerListener:
             session_data["codexThreadId"] = self.codex_thread_id
         if self.harness_uid:
             session_data["harnessSessionUid"] = self.harness_uid
+        for key, value in self.extra_registration.items():
+            session_data.setdefault(key, value)
         atomic_write_json(self.json_path, session_data)
+        if self.on_registered:
+            self.on_registered(self.name)
 
         # accept() only starts after setup() returns, so this cursor baseline
         # is always earlier than any message this session will actually see.

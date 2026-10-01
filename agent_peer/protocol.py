@@ -168,13 +168,22 @@ def _codex_conversation_session_name() -> Optional[str]:
     pick = max(live or matches, key=lambda s: float(s.get("startedAt") or 0))
     return pick["name"]
 
+def _native_conversation_session_name() -> Optional[str]:
+    """Same idea for harnesses with a native module (agy): the conversation id in the environment."""
+    try:
+        from .native import session_name_from_env
+
+        return session_name_from_env(os.environ)
+    except Exception:
+        return None
+
 def auto_session_name() -> str:
     """Best-effort per-harness session name, e.g. 'agy-33402', 'pi-1234'.
     If the detected harness pid already has a live registered session
     (e.g. it ran `listen --name foo`), reuse that official name so every
     command agrees on one identity instead of inventing `<harness>-<pid>`
     (0028 fix #1). Lazy registry import: registry imports this module."""
-    by_conversation = _codex_conversation_session_name()
+    by_conversation = _codex_conversation_session_name() or _native_conversation_session_name()
     if by_conversation:
         return by_conversation
     name, pid = detect_harness_identity()

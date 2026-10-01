@@ -10,6 +10,7 @@ from .registry import get_active_sessions, resolve_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
+from .native import get_native
 from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only
 from .join import run_join
 from .logs import show_logs, show_thread_logs
@@ -177,13 +178,16 @@ def cmd_listen(args):
     codex_thread_id = args.codex_thread or os.environ.get("CODEX_THREAD_ID")
     # Prefer the harness process's own stable cwd over this subprocess's own.
     cwd = args.cwd or (get_harness_cwd(harness_pid) if harness_pid else None)
+    native = get_native(harness)
     listener = PeerListener(
         name=name,
         cwd=cwd,
         agent_type=(harness.upper() if harness else None),
         codex_thread_id=codex_thread_id,
         force=args.force,
-        harness_pid=harness_pid
+        harness_pid=harness_pid,
+        extra_registration=native.listen_info(os.environ) if native else None,
+        on_registered=(lambda registered: native.remember_name(os.environ, registered)) if native else None
     )
     listener.run()
 

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 690" width="1100" height="690" role="img" aria-labelledby="t d">
   <title id="t">How agent-peer delivers a message</title>
-  <desc id="d">agent-peer send finds the target in the registry, then delivers natively to Claude Code and Codex CLI, or through a Unix socket, inbox file and wait loop to Antigravity, pi, opencode and muse. Every delivery is recorded in the shared registry and state directory.</desc>
+  <desc id="d">agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI and Antigravity, or through a Unix socket, inbox file and wait loop to pi, opencode and muse. Every delivery is recorded in the shared registry and state directory.</desc>
   <defs>
     <filter id="chalk" x="-4%" y="-6%" width="108%" height="112%">
       <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="warp"/>
@@ -68,16 +68,17 @@
   <g font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" fill="#1b2a4a">
     <!-- native -->
     <text x="68" y="246" font-size="15" font-weight="700" letter-spacing="1">NATIVE HARNESSES</text>
-    <text x="68" y="268" font-size="13" font-style="italic">Claude Code · Codex CLI</text>
-    <text x="68" y="304" font-size="13">Claude Code: its own /peer socket.</text>
-    <text x="68" y="326" font-size="13">Codex CLI: codex queue --thread &lt;id&gt;.</text>
-    <text x="68" y="360" font-size="13">No listen or wait step needed:</text>
-    <text x="68" y="380" font-size="13">the message simply arrives.</text>
+    <text x="68" y="268" font-size="13" font-style="italic">Claude Code · Codex CLI · Antigravity</text>
+    <text x="68" y="298" font-size="13">Claude Code: its own /peer socket.</text>
+    <text x="68" y="318" font-size="13">Codex CLI: codex queue --thread &lt;id&gt;.</text>
+    <text x="68" y="338" font-size="13">Antigravity: a user turn through its</text>
+    <text x="68" y="356" font-size="13">language server (agent-peer 0.11.0+).</text>
+    <text x="68" y="388" font-size="13">No wait step needed: it simply arrives.</text>
     <text x="408" y="254" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">02</text>
 
     <!-- socket -->
     <text x="490" y="246" font-size="15" font-weight="700" letter-spacing="1">SOCKET HARNESSES</text>
-    <text x="490" y="268" font-size="13" font-style="italic">Antigravity · pi · opencode · muse</text>
+    <text x="490" y="268" font-size="13" font-style="italic">pi · opencode · muse (and older Antigravity)</text>
     <text x="490" y="298" font-size="13">A Unix socket (Named Pipe on Windows), opened only after a handshake:</text>
     <text x="490" y="318" font-size="13">live pid, matching start time, and the session's auth token.</text>
     <text x="1032" y="254" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">02</text>

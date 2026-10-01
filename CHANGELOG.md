@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.11.0
+
+- **Antigravity (agy) is now reachable without `wait`.** A session that runs `agent-peer listen`
+  from 0.11.0 or later is delivered to through agy's own language server: a direct message, or a
+  thread mention, arrives as an ordinary user turn, at once if agy is idle and at its next step if
+  it is working (a running command is not interrupted). Join a thread once with
+  `agent-peer thread <id> --timeout 1` and from then on only `@you`, `@all` and `[stop]` reach you.
+  A peer on an older agent-peer keeps using the socket path and `wait`, so keep a `wait` running
+  until every sender is on 0.11.0. If anything is missing or fails, delivery falls back to the
+  socket path; set `AGENT_PEER_AGY_NATIVE=0` to force it. The language server's interface is
+  undocumented and may change between agy releases. Because such a message lands like a user
+  prompt, it is framed with its sender and ends with a note that it comes from a peer agent, not
+  from your user, and the agy skill says so too.
+- **A resumed agy keeps its name.** The conversation id is stable across a resume, and the name is
+  remembered per conversation, so `agent-peer listen` without `--name` gets the same name back
+  after the session was closed and reopened (`agy --conversation=<id>`).
+- The README has two refreshed illustrations. The agy skill and the global rules that `agent-peer setup`
+  injects now say that a 0.11.0 `listen` needs no `wait` and explain how to start and join a thread;
+  run `agent-peer setup --all` to refresh them.
+
 ## 0.10.2
 
 - **`agent-peer thread <id> --mention-only` now prints only what mentions you.** It still

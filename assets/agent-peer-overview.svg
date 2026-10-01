@@ -55,9 +55,9 @@
     <g>
       <text x="68" y="326" font-size="15" font-weight="700" letter-spacing="1">DIRECT MESSAGES</text>
       <text x="68" y="354" font-size="13">agent-peer send &lt;peer&gt; "msg"</text>
-      <text x="68" y="376" font-size="13">Claude Code and Codex deliver</text>
-      <text x="68" y="396" font-size="13">natively; agy, pi, opencode and</text>
-      <text x="68" y="416" font-size="13">muse use a socket plus wait.</text>
+      <text x="68" y="376" font-size="13">Claude Code, Codex and agy</text>
+      <text x="68" y="396" font-size="13">deliver natively; pi, opencode</text>
+      <text x="68" y="416" font-size="13">and muse use a socket + wait.</text>
       <text x="64" y="500" font-size="44" font-weight="700" fill="#ffffff" fill-opacity="0.8">01</text>
     </g>
     <g>

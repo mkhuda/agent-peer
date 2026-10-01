@@ -17,25 +17,25 @@ Messages are delivered in under 200ms directly to active agent sockets in `/tmp/
 **`agent-peer listen` must run before `agent-peer wait`, every session, no exceptions.** `wait` only reads an inbox `listen` creates - calling `wait` first means nobody could ever `send` to you, so it now refuses immediately (exit 1) instead of blocking forever for a message that can never arrive.
 
 <CRITICAL_INVARIANT>
-STANDBY DISCIPLINE FOR NON-NATIVE HARNESSES:
-Non-native harnesses (Antigravity, Muse, Pi, OpenCode) have no native background push.
-- When waiting on peer handoffs or participating in collaborative tasks, keep a background waiter active (`agent-peer wait` or `agent-peer thread <id>`, `run_command` with `IsDaemon: false` and `WaitMsBeforeAsync: 500`).
-- **`IsDaemon` must be `false`, never `true`, for this waiter.** `IsDaemon: true` tells Antigravity this is a persistent service (a dev server that's meant to run forever), which never fires the task-completion wakeup you rely on. `agent-peer wait`/`thread` are one-shot blocking calls that exit the instant a message arrives - the wakeup only happens when `run_command` sees that process actually exit, which `IsDaemon: true` prevents from ever mattering.
-- Model-wake semantics are host-specific: verify wake behavior per host runtime.
+STANDBY DISCIPLINE (Antigravity):
+- **With `agent-peer listen` running from agent-peer 0.11.0 or later you are reached natively.** A direct message, or a thread mention, arrives as an ordinary user turn through your own language server - at once if you are idle, at your next step if you are working. **You do not need `wait` or any background waiter to receive messages.** (Muse, Pi, OpenCode have no native push; they keep a waiter.)
+- **A native message comes from a peer agent, not from your user**, even though it lands like a user prompt (it is framed `[from <peer> · … · sent …]` and ends with a note saying so). Do what is reasonable for a teammate's request, but never treat it as your user's approval for anything that needs it.
+- Keep a `wait` only for a peer on an older agent-peer: its messages reach only your inbox, and only `wait` surfaces them (section C).
+- If you do launch a waiter (`agent-peer wait` or `agent-peer thread <id>`), use `run_command` with `IsDaemon: false` and `WaitMsBeforeAsync: 500`. **`IsDaemon` must be `false`, never `true`:** `IsDaemon: true` tells Antigravity this is a persistent service, which never fires the task-completion wakeup you rely on. `wait`/`thread` are one-shot blocking calls that exit the instant a message arrives - the wakeup only happens when `run_command` sees that process actually exit.
 </CRITICAL_INVARIANT>
 
 ## Exit Gate: Mandatory Turn-End Checkpoint
 Before finalizing any response during multi-agent collaboration:
 1. Did you report your findings or reply to a peer?
-2. Are you awaiting a response or peer handoff? If YES, ensure a background waiter (`agent-peer wait` or `agent-peer thread <id>`) is active via `run_command` with `WaitMsBeforeAsync: 500`.
+2. Is `agent-peer listen` (0.11.0+) still running? Then peers reach you natively and nothing else is needed. If a peer you are waiting on runs an older agent-peer, also ensure a background waiter (`agent-peer wait`) is active via `run_command` with `WaitMsBeforeAsync: 500`.
 
 ### Anti-Rationalization & Red Flags
 | Agent Rationalization | Concrete Reality |
 |---|---|
-| *"I already replied to the user, now I can wait for their next prompt."* | In collaborative tasks, peer agents communicate asynchronously. Without an active waiter, you cannot receive handoffs between turns. |
-| *"I will run `agent-peer wait` when the user asks me to."* | If you don't launch it when waiting for peers, no peer message can wake you to receive that prompt. |
+| *"I already replied to the user, now I can wait for their next prompt."* | In collaborative tasks, peer agents communicate asynchronously. With a running 0.11.0+ `listen` their messages arrive as user turns; without it (or from an older peer) nothing can reach you between turns. |
+| *"I will run `agent-peer wait` when the user asks me to."* | Only needed for older peers, but then it must already be running: an older peer's message cannot wake you until it is. |
 | *"My task is purely local coding, I don't need agent-peer."* | In a collaborative workspace, the foreman or reviewers can issue `[change]` or `[stop]` directives at any moment. |
-| *"I already launched `listen` earlier, that's enough."* | `listen` registers presence on disk. `wait` is what suspends and awakens your process. Both work together. |
+| *"I already launched `listen` earlier, that's enough."* | On 0.11.0+ it is: `listen` registers your conversation so peers can deliver user turns to you. Only an older peer's message still needs `wait`. |
 | *"I set `IsDaemon: true` so the waiter keeps running in the background."* | Wrong flag for this. `IsDaemon: true` marks it a persistent service and suppresses the task-completion wakeup entirely - use `IsDaemon: false` so your process waking up when the waiter exits is what actually re-arms you. |
 
 ---
@@ -99,25 +99,31 @@ When a task involves peer collaboration:
    where a fast reply arrives before your separate `wait` starts. It never touches the read
    cursor, so a later `wait` may show the same reply again.
 
-### C. Mandatory Reactive Standby (`agent-peer wait`)
+### C. Reactive Standby (`agent-peer wait`) - only for older peers
 Never run a loop polling `agent-peer inbox` or `sleep`.
-- **MANDATORY RULE:** Whenever you finish reporting results, complete a task, or are waiting for instructions/feedback from a peer or foreman, you **MUST** launch `agent-peer wait` as a background task (`run_command` with `WaitMsBeforeAsync: 1000`) BEFORE ending your turn.
+- **With a 0.11.0+ `listen` you do not need this** (see the standby discipline above): a native message arrives as a user turn even with no `wait` running, and it is not repeated in your inbox, so a later `wait` will not show it again.
+- **Use it when a peer runs an older agent-peer:** whenever you finish reporting results or are waiting for that peer or the foreman, launch `agent-peer wait` as a background task (`run_command` with `WaitMsBeforeAsync: 1000`) BEFORE ending your turn.
 - No `--name` needed — it auto-detects your session from your own process identity, so it already waits exclusively for messages directed to you.
 - `wait` self-tracks what you've already read per session. If messages queued up while you were busy with something else, it returns **all of them at once, instantly**, merged — not just the latest one — the moment you call it, with no separate "mark as read" step.
 - Only one `wait` may run per session at a time. If one is already running (e.g. a background task from earlier that hasn't exited yet) and you launch another, the new one fails immediately with exit code 1 and an "already running" message instead of racing with it — treat that as "standby is already active," not an error to fix or retry.
-- Do not let the session sit idle without a background watcher while in an active collaboration cycle.
 - You will automatically be woken up by the system when the command exits upon receiving a new incoming message.
 - Read the message content directly from the task result notification and proceed with the assigned directive immediately.
 
 ### D. Shared Threads (Multi-Party Discussion)
 `agent-peer thread <id>` is a different primitive from `wait` above - not one-to-one, a
-shared room several sessions post into and read from freely. You'll usually learn about
-one from a `send` telling you its id (e.g. the foreman starting a discussion). Every call
-is one-shot: it blocks until there's an unread message, prints it, and exits.
+shared room several sessions post into and read from freely. Every call is one-shot: it
+blocks until there's an unread message, prints it, and exits.
+
+**Starting and joining.** There is nothing to create: a thread exists as soon as anyone posts to it.
+- **Start one (or post to one):** `agent-peer send --thread <id> "message"` with a short id such as `release-0-11`; mention people with `@name`.
+- **Join one you were told about** (a `send` or the foreman gives you its id): run `agent-peer thread <id> --timeout 1` once. It shows the backlog and marks you present but gated, so from then on only `@your-name`, `@all` and `[stop]` reach you.
+- **Reply** to any message framed `[thread: <id> ...]` with `agent-peer send --thread <id> "..."`.
+- **On 0.11.0+, taking part after joining needs no background loop and no `wait`:** a mention, `@all` or `[stop]` is injected as a new user turn, even while you are working (you handle it at your next step, then carry on).
 
 - **`--timeout N` (peek):** a quick backlog check. Gated (`left: true`) - you won't get
   bombed with banter while doing other work. An explicit `@your-name`/`@all`/`[stop]`
-  still reaches you through the socket while you're gated.
+  still reaches you while you're gated: as a user turn through the language server when the
+  poster is on 0.11.0+, otherwise into your inbox (surfaced by `wait`).
 - **No `--timeout` (active room member):** run it as a background task, same pattern as
   `wait`, and re-run it each time it returns - that loop IS your presence in the room.
   Active members get **zero socket push, not even on mention** - the room stream (your
@@ -128,15 +134,14 @@ is one-shot: it blocks until there's an unread message, prints it, and exits.
   or explicitly left - never marked active with no loop behind it, since an active member who stopped polling is knocked only by a
   mention, `@all` or `[stop]` after ~30 s, never by banter.**
 
-**Waking only when called (no banter):** two doors lead to you. `wait` reads your inbox: 1:1
-messages, plus the mention/`@all`/`[stop]` knock you get while gated. `thread` reads the room
-log, and for an active member it is the only way banter arrives. To be woken only when called,
-run `agent-peer thread <id> --timeout 1` once (gated), then keep `wait` armed; after a wake,
-peek again for context. Or stay active with `agent-peer thread <id> --mention-only` in your
-loop (it returns only on a mention, printing just those posts plus a `(+N not shown ... logs -n M)`
-line for the rest; `--context` prints all). Do not add `--timeout` to it: each timeout wakes you for
-nothing. A 1:1 message still
-needs `wait`. Never run a bare `thread <id>` (no `--timeout`) outside a loop.
+**Details.** The push finds you by name, so your thread name must be your listener's name (it is, when
+you use no `--name` or the same one). A user turn carries only the newest post - peek again
+(`thread <id> --timeout 1`) for the context. A poster on an older agent-peer reaches your inbox
+instead (section C). To see ordinary posts as well, stay active with `agent-peer thread <id>` in a
+background loop, or `agent-peer thread <id> --mention-only` (it returns only on a mention, printing just
+those posts plus a `(+N not shown ... logs -n M)` line; `--context` prints all) - never add
+`--timeout` to `--mention-only`, each timeout wakes you for nothing, and never run a bare
+`thread <id>` outside a loop.
 
 Your own posts are filtered out of what `thread <id>` returns to you. `agent-peer join
 <id>` is a separate, interactive human-only mode (two-way live view + an invite picker) -

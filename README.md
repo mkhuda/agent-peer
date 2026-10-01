@@ -27,17 +27,19 @@ can find, message, and reactively wake up any other. No polling, no
 per-harness glue code.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-flow.webp" alt="agent-peer send finds the target in the registry, then delivers natively to Claude Code and Codex CLI, or through a Unix socket, an inbox file, and a wait loop to Antigravity, pi, opencode, and muse. Every delivery is recorded in the shared registry and state directory." width="880" />
+  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-flow.webp" alt="agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI, and Antigravity, or through a Unix socket, an inbox file, and a wait loop to pi, opencode, and muse. Every delivery is recorded in the shared registry and state directory." width="880" />
 </p>
 
 No harness is the hub here. Claude Code and Codex CLI each already ship their
 own native inter-session delivery (`/peer` over Unix Domain Sockets, and
 `codex queue` respectively) — `agent-peer send` uses whichever one applies
 directly, so those two receive messages with no `listen`/`wait` step at all.
-Antigravity, `pi`, opencode, and muse have no native equivalent, so
-`agent-peer` gives them a shared socket transport (Unix Domain Sockets on
-macOS/Linux, Named Pipes on Windows) plus a blocking `wait` that plays the
-same role. Every delivery gets logged to the same registry either way, so
+Antigravity (agy) has a door of its own: its language server accepts a user turn,
+which `agent-peer send` uses once the session runs `listen` from agent-peer 0.11.0 or
+later, so it too is woken without `wait`. `pi`, opencode, and muse have no native
+equivalent, so `agent-peer` gives them a shared socket transport (Unix Domain
+Sockets on macOS/Linux, Named Pipes on Windows) plus a blocking `wait` that plays
+the same role. An Antigravity peer on an older agent-peer keeps using that path. Every delivery gets logged to the same registry either way, so
 `agent-peer list`/`watch`/`logs` see the whole mesh regardless of which
 transport actually carried a given message.
 
@@ -249,8 +251,8 @@ verified against its own source/docs rather than assumed.
 
 ## Architecture
 
-**Antigravity, `pi`/oh-my-pi, opencode, and muse** go through agent-peer's
-own socket transport (Unix Domain Sockets on macOS/Linux, Named Pipes on
+**`pi`/oh-my-pi, opencode, and muse** (and Antigravity when a peer is on an older
+agent-peer) go through agent-peer's own socket transport (Unix Domain Sockets on macOS/Linux, Named Pipes on
 Windows via `agent_peer/compat.py`), which mirrors the handshake Claude Code
 enforces for its native sessions:
 
@@ -273,6 +275,16 @@ process environment (since 0.154.0) and `listen` picks it up automatically —
 for an older Codex without it. Either way the delivery is still recorded to
 `~/.agent-peer/inbox.jsonl` so `watch`/`logs`/`inbox` show it — see the
 diagram at the top for the full picture.
+
+**Antigravity (agy)** exports its language server's address, CSRF token and conversation id
+into the shell it runs tools in. `agent-peer listen` reads them from its own environment,
+keeps the token only in a private file under `~/.agent-peer/agy-ls/`, and registers just the
+conversation id. `agent-peer send` then calls the server's `SendUserCascadeMessage`, which
+lands as an ordinary user turn - at once if agy is idle, at its next step if it is working.
+The conversation id is stable across a resume, so the session also gets its name back without
+`--name`. Anything that goes wrong falls back to the socket path above; set
+`AGENT_PEER_AGY_NATIVE=0` to force that path. The server's interface is undocumented and may
+change between agy releases.
 
 ## Docs
 
