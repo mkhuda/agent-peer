@@ -6,7 +6,7 @@ import time
 
 from . import compat
 
-from .registry import get_active_sessions, resolve_session
+from .registry import get_active_sessions, remove_session, resolve_session, update_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
@@ -17,7 +17,7 @@ from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
 from .claude_status import format_claude_status, get_claude_status_dict
 from .codex_status import format_codex_status, get_codex_status_dict
-from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, atomic_write_json, SESSIONS_DIR, SOCKET_DIR
+from .protocol import get_lock_path, auto_session_name, detect_harness_identity, get_harness_cwd, SOCKET_DIR
 from . import agy_live
 from . import __version__
 from . import harness_detect, setup_rules, setup_tui, update_check
@@ -31,7 +31,7 @@ def cmd_list(args):
         sessions = [s for s in sessions if needle in (s.get("cwd") or "").lower()]
 
     if not sessions:
-        print("No active Claude Code sessions found." if not cwd_filter else f"No sessions found with cwd matching '{cwd_filter}'.")
+        print("No active sessions found." if not cwd_filter else f"No sessions found with cwd matching '{cwd_filter}'.")
         return
 
     print(f"{'PID':<8} {'SESSION NAME':<24} {'ENGINE':<8} {'STATUS':<8} {'ALIVE':<6} {'SOCKET':<28} {'CWD'}")
@@ -52,7 +52,7 @@ def cmd_list(args):
             cwd = "..." + cwd[-27:]
         queued = f"  [{s['queued']} unread, oldest {_short_age(s.get('queuedOldestAgeS', 0))}]" if s.get("queued") else ""
         print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}{queued}")
-    print(f"\nTotal: {len(sessions)} sessions registered in ~/.claude/sessions/")
+    print(f"\nTotal: {len(sessions)} sessions")
 
 def _clock(ts) -> str:
     """HH:MM:SS, with the date when older than a day; empty when the record has no time."""
@@ -95,11 +95,8 @@ def cmd_prune(args):
     for s in dead:
         pid = s.get("pid")
         name = s.get("name") or "(untitled)"
-        removed = []
-        paths = [
-            os.path.join(SESSIONS_DIR, f"{pid}.json"),
-            s.get("keyFile"),
-        ]
+        removed = remove_session(s.get("jsonPath"), s.get("keyFile"))
+        paths = []
         if not compat.IS_WINDOWS:
             # Named Pipes aren't filesystem entries - nothing to unlink, and
             # messagingSocketPath is just a pipe id there, not a real path.
@@ -242,12 +239,7 @@ def _reset_status_idle(session: str):
     listener.py sets 'new-msg' but never clears it on its own."""
     try:
         session_data, _, _ = resolve_session(session)
-        json_path = os.path.join(SESSIONS_DIR, f"{session_data['pid']}.json")
-        with open(json_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-        meta["status"] = "idle"
-        meta["statusUpdatedAt"] = int(time.time() * 1000)
-        atomic_write_json(json_path, meta)
+        update_session(session_data["jsonPath"], {"status": "idle", "statusUpdatedAt": int(time.time() * 1000)})
     except Exception:
         pass
 

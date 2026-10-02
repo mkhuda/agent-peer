@@ -15,16 +15,15 @@ NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"
 from typing import Optional
 
 from .protocol import (
-    SESSIONS_DIR,
     SOCKET_DIR,
     ensure_dirs,
     get_proc_start,
     generate_peer_token,
     generate_key_filename,
     harness_session_uid,
-    atomic_write_json,
 )
 from .inbox import append_inbox, mark_session_start
+from .registry import ensure_sessions_dir, remove_session, session_paths, update_session, write_key, write_session
 from . import compat
 
 
@@ -58,8 +57,7 @@ class PeerListener:
         self.symlink_path = _socket_address(self.name)
         self.key_filename = generate_key_filename(self.pid, self.sock_path)
         
-        self.json_path = os.path.join(SESSIONS_DIR, f"{self.pid}.json")
-        self.key_path = os.path.join(SESSIONS_DIR, self.key_filename)
+        self.json_path, self.key_path = session_paths(self.pid, self.key_filename)
         
         self.server_sock = None
         self.running = False
@@ -67,7 +65,7 @@ class PeerListener:
 
     def setup(self):
         ensure_dirs()
-        os.makedirs(SESSIONS_DIR, exist_ok=True)  # only a registering listener may create Claude's directory
+        ensure_sessions_dir()  # only a registering listener may create Claude's directory
         proc_start = get_proc_start(self.pid)
         now_ms = int(time.time() * 1000)
 
@@ -133,9 +131,7 @@ class PeerListener:
             "procStart": proc_start,
             "pidDomain": "win32" if compat.IS_WINDOWS else "darwin"
         }
-        with open(self.key_path, "w", encoding="utf-8") as f:
-            json.dump(key_data, f)
-        compat.secure_file(self.key_path)
+        write_key(self.key_path, key_data)
 
         # 5. Write session json
         session_data = {
@@ -175,7 +171,7 @@ class PeerListener:
             session_data["harnessSessionUid"] = self.harness_uid
         for key, value in self.extra_registration.items():
             session_data.setdefault(key, value)
-        atomic_write_json(self.json_path, session_data)
+        write_session(self.json_path, session_data)
         if self.on_registered:
             self.on_registered(self.name)
 
@@ -195,12 +191,17 @@ class PeerListener:
             except Exception:
                 pass
 
-        for p in [self.sock_path, self.symlink_path, self.json_path, self.key_path]:
+        # The name link is removed only while it still points at this listener's socket.
+        owned = [self.sock_path]
+        if os.path.islink(self.symlink_path) and os.readlink(self.symlink_path) == self.sock_path:
+            owned.append(self.symlink_path)
+        for p in owned:
             if os.path.exists(p) or os.path.islink(p):
                 try:
                     os.unlink(p)
                 except OSError:
                     pass
+        remove_session(self.json_path, self.key_path)
 
     def handle_client(self, client: socket.socket):
         client.settimeout(5.0)
@@ -289,14 +290,13 @@ class PeerListener:
 
         # 1. Update session json with title & status (agent-ps sees this!)
         try:
-            if os.path.exists(self.json_path):
-                with open(self.json_path, "r", encoding="utf-8") as f:
-                    meta = json.load(f)
-                meta["title"] = f"📬 [{sender_label}]: {clean_snippet}"
-                meta["status"] = "new-msg"
-                meta["updatedAt"] = int(time.time() * 1000)
-                meta["statusUpdatedAt"] = int(time.time() * 1000)
-                atomic_write_json(self.json_path, meta)
+            now_ms = int(time.time() * 1000)
+            update_session(self.json_path, {
+                "title": f"📬 [{sender_label}]: {clean_snippet}",
+                "status": "new-msg",
+                "updatedAt": now_ms,
+                "statusUpdatedAt": now_ms,
+            })
         except Exception:
             pass
 
@@ -329,16 +329,16 @@ class PeerListener:
         sys.stdout.flush()
 
     def run(self):
-        self.setup()
-        self.running = True
-
         def _signal_handler(sig, frame):
             print("\nShutting down listener and unregistering session...")
             self.cleanup()
             sys.exit(0)
 
+        # Before setup() publishes the registration, so a stop during start-up still cleans up.
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
+        self.setup()
+        self.running = True
 
         print(f"🚀 agent-peer listener active:")
         print(f"   Name:     {self.name}")

@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent_peer import native, protocol
 from agent_peer.native import agy_ls
-from tests.helpers import REPO_ROOT, isolated_home, run_cli, wait_until
+from tests.helpers import REPO_ROOT, isolated_env, isolated_home, run_cli, socket_dir, wait_until
 
 CONV = "f5246d08-228f-41c8-be8a-b6449cd36584"
 TOKEN = "secret-csrf-token-value"
@@ -412,7 +412,7 @@ class _ListenHarness(unittest.TestCase):
             proc.kill()
             proc.wait()
         for session in self._sessions():
-            link = os.path.join("/tmp/cc-socks", f"{session.get('name')}.sock")
+            link = os.path.join(socket_dir(self.home), f"{session.get('name')}.sock")
             if str(session.get("name", "")).startswith("zz-test-"):
                 for leftover in (link, session.get("messagingSocketPath")):
                     if leftover and (os.path.islink(leftover) or os.path.exists(leftover)):
@@ -424,7 +424,7 @@ class _ListenHarness(unittest.TestCase):
         return [_load(p) for p in glob.glob(os.path.join(self.home, ".claude", "sessions", "*.json"))]
 
     def _listen(self, *args):
-        env = dict(os.environ, HOME=self.home, **_env(self.ls.addr))
+        env = isolated_env(self.home, **_env(self.ls.addr))
         before = {s["pid"] for s in self._sessions()}
         proc = subprocess.Popen([sys.executable, self.launcher, *args], cwd=REPO_ROOT, env=env)
         self.procs.append(proc)

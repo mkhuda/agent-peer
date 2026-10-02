@@ -755,10 +755,13 @@ class AutoNameFixOneTest(unittest.TestCase):
         # Both modules bound SESSIONS_DIR at import; patch both.
         protocol.SESSIONS_DIR = self._tmp.name
         registry.SESSIONS_DIR = self._tmp.name
+        self._orig_agent_sessions = registry.AGENT_SESSIONS_DIR
+        registry.AGENT_SESSIONS_DIR = os.path.join(self._tmp.name, "agent-peer-absent")
 
     def tearDown(self):
         self.protocol.SESSIONS_DIR = self._orig_sessions
         self.registry.SESSIONS_DIR = self._orig_sessions
+        self.registry.AGENT_SESSIONS_DIR = self._orig_agent_sessions
         self.protocol.detect_harness_identity = self._orig_detect
         self._tmp.cleanup()
 

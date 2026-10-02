@@ -4,7 +4,8 @@ import json
 import re
 from typing import List, Dict, Optional, Tuple
 
-from .protocol import SESSIONS_DIR, SOCKET_DIR, is_pid_alive, get_proc_start
+from . import compat
+from .protocol import AGENT_SESSIONS_DIR, SESSIONS_DIR, SOCKET_DIR, atomic_write_json, is_pid_alive, get_proc_start
 from .codex_queue import queue_state
 
 _json_decoder = json.JSONDecoder()
@@ -77,6 +78,49 @@ def _apply_codex_queue_status(sessions: List[Dict]) -> None:
         if state and state[0] >= 1 and state[1] and now - state[1] >= _CODEX_BUSY_MIN_QUEUE_AGE_S:
             s["status"] = "busy"
 
+def session_paths(pid: int, key_filename: str) -> Tuple[str, str]:
+    """(json_path, key_path) a listener with this pid registers under."""
+    return os.path.join(SESSIONS_DIR, f"{pid}.json"), os.path.join(SESSIONS_DIR, key_filename)
+
+
+def ensure_sessions_dir() -> None:
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+
+def write_key(key_path: str, key_data: Dict) -> None:
+    with open(key_path, "w", encoding="utf-8") as f:
+        json.dump(key_data, f)
+    compat.secure_file(key_path)
+
+
+def write_session(json_path: str, meta: Dict) -> None:
+    atomic_write_json(json_path, meta)
+
+
+def update_session(json_path: str, fields: Dict) -> bool:
+    """Merge `fields` into an existing entry; False when the entry is gone."""
+    if not os.path.exists(json_path):
+        return False
+    with open(json_path, "r", encoding="utf-8") as f:
+        meta = json.load(f)
+    meta.update(fields)
+    atomic_write_json(json_path, meta)
+    return True
+
+
+def remove_session(json_path: Optional[str], key_path: Optional[str]) -> List[str]:
+    """Delete an entry's json and key file; returns the paths actually removed."""
+    removed = []
+    for p in (json_path, key_path):
+        if p and (os.path.exists(p) or os.path.islink(p)):
+            try:
+                os.unlink(p)
+                removed.append(p)
+            except OSError:
+                pass
+    return removed
+
+
 def get_session_agent_type(session_data: dict) -> str:
     """Determine if session is 'AGY' (Google Antigravity) or 'Claude' (Claude Code)."""
     if session_data.get("agentType"):
@@ -86,57 +130,108 @@ def get_session_agent_type(session_data: dict) -> str:
         return "AGY"
     return "Claude"
 
-def get_active_sessions() -> List[Dict]:
-    """Discover all active sessions registered in ~/.claude/sessions/"""
-    sessions = []
-    if not os.path.exists(SESSIONS_DIR):
-        return sessions
+def _registry_dirs() -> List[Tuple[str, str]]:
+    """(directory, source) in precedence order; AGENT_PEER_REGISTRY=legacy reads only Claude's."""
+    if os.environ.get("AGENT_PEER_REGISTRY") == "legacy":
+        return [(SESSIONS_DIR, "claude")]
+    return [(AGENT_SESSIONS_DIR, "agent-peer"), (SESSIONS_DIR, "claude")]
 
-    for fname in os.listdir(SESSIONS_DIR):
-        m = PID_JSON_RE.match(fname)
-        if not m:
+
+def _read_entries(directory: str, source: str) -> List[Dict]:
+    entries = []
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return entries
+
+    for fname in names:
+        if source == "claude":
+            m = PID_JSON_RE.match(fname)
+            if not m:
+                continue
+            file_pid = int(m.group(1))
+        elif fname.endswith(".json") and ".tmp." not in fname:
+            file_pid = None
+        else:
             continue
-        pid = int(m.group(1))
-        
-        # Check if process is alive
-        alive = is_pid_alive(pid)
-        
-        json_path = os.path.join(SESSIONS_DIR, fname)
+
+        json_path = os.path.join(directory, fname)
         try:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = _load_json_lenient(f.read())
         except Exception:
             continue
-
         if not isinstance(data, dict):
             continue
 
+        pid = file_pid if file_pid is not None else data.get("pid")
+        if not isinstance(pid, int):
+            continue
+
         data["pid"] = pid
-        data["alive"] = alive
+        data["alive"] = is_pid_alive(pid)
+        data["jsonPath"] = json_path
+        data["source"] = source
         data["agentType"] = get_session_agent_type(data)
 
-        # Find key file
-        key_files = glob.glob(os.path.join(SESSIONS_DIR, f"{pid}.*.key"))
+        if source == "claude":
+            key_files = glob.glob(os.path.join(directory, f"{pid}.*.key"))
+            key_file_path = key_files[0] if key_files else None
+        else:
+            key_file_path = json_path[: -len(".json")] + ".key"
         peer_token = None
-        key_file_path = None
-        if key_files:
-            key_file_path = key_files[0]
+        if key_file_path and os.path.exists(key_file_path):
             try:
                 with open(key_file_path, "r", encoding="utf-8") as f:
-                    key_data = json.load(f)
-                    peer_token = key_data.get("peerToken")
+                    peer_token = json.load(f).get("peerToken")
             except Exception:
                 pass
 
         data["peerToken"] = peer_token
-        data["keyFile"] = key_file_path
+        data["keyFile"] = key_file_path if key_file_path and os.path.exists(key_file_path) else None
 
-        # Check socket
         sock_path = data.get("messagingSocketPath") or os.path.join(SOCKET_DIR, f"{pid}.sock")
         data["messagingSocketPath"] = sock_path
         data["socketExists"] = os.path.exists(sock_path)
+        entries.append(data)
+    return entries
 
-        sessions.append(data)
+
+# Status fields follow whichever copy of one listener's entry was written last.
+_STATUS_FIELDS = ("status", "statusUpdatedAt", "title", "updatedAt")
+
+
+def _merge_entries(entries: List[Dict]) -> List[Dict]:
+    """One entry per listener (`sessionId` on the same pid): the first copy wins, newer status wins."""
+    by_listener: Dict[Tuple[str, int], Dict] = {}
+    merged = []
+    for entry in entries:
+        sid = entry.get("sessionId")
+        kept = by_listener.get((sid, entry["pid"])) if sid else None
+        if kept is None:
+            if sid:
+                by_listener[(sid, entry["pid"])] = entry
+            merged.append(entry)
+        elif (entry.get("statusUpdatedAt") or 0) > (kept.get("statusUpdatedAt") or 0):
+            for field in _STATUS_FIELDS:
+                if field in entry:
+                    kept[field] = entry[field]
+
+    # One pid, one entry: after a pid is reused only the newer listener counts.
+    newest: Dict[int, Dict] = {}
+    for entry in merged:
+        cur = newest.get(entry["pid"])
+        if cur is None or (entry.get("startedAt") or 0) > (cur.get("startedAt") or 0):
+            newest[entry["pid"]] = entry
+    return [e for e in merged if newest[e["pid"]] is e]
+
+
+def get_active_sessions() -> List[Dict]:
+    """Discover sessions registered in ~/.agent-peer/sessions and in Claude's ~/.claude/sessions."""
+    entries = []
+    for directory, source in _registry_dirs():
+        entries.extend(_read_entries(directory, source))
+    sessions = _merge_entries(entries)
 
     _apply_agy_live_status(sessions)
     _apply_codex_queue_status(sessions)

@@ -12,7 +12,7 @@ class EmptyHomeTest(unittest.TestCase):
         with isolated_home() as home:
             result = run_cli(["list"], home)
             self.assertEqual(result.returncode, 0, result.stderr)
-            self.assertIn("No active Claude Code sessions found", result.stdout)
+            self.assertIn("No active sessions found", result.stdout)
 
     def test_inbox_on_a_fresh_home_does_not_crash(self):
         with isolated_home() as home:

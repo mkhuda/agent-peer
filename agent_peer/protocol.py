@@ -11,8 +11,9 @@ from .compat import is_pid_alive, get_process_field, get_process_start_time as g
 
 CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
 SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
-SOCKET_DIR = "/tmp/cc-socks"
+SOCKET_DIR = os.environ.get("AGENT_PEER_SOCKET_DIR") or "/tmp/cc-socks"
 AGENT_PEER_DIR = os.path.expanduser("~/.agent-peer")
+AGENT_SESSIONS_DIR = os.path.join(AGENT_PEER_DIR, "sessions")
 INBOX_FILE = os.path.join(AGENT_PEER_DIR, "inbox.jsonl")
 INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
 CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
