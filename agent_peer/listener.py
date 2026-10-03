@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 import json
 import time
@@ -33,6 +34,10 @@ def _socket_address(identifier: str) -> str:
     if compat.IS_WINDOWS:
         return f"agent-peer-{identifier}"
     return os.path.join(SOCKET_DIR, f"{identifier}.sock")
+
+# A thread push as senders frame it: an optional "[from ...]" line, then the thread header, both at the very start.
+_THREAD_POST = re.compile(r"(?:\[from [^\]\n]*\]\n)?\[thread: [^\]\n]+ #\d+ from [^\]\n]+\]: ")
+
 
 class PeerListener:
     def __init__(self, name: str = "agent", cwd: Optional[str] = None, agent_type: Optional[str] = None, codex_thread_id: Optional[str] = None, force: bool = False, harness_pid: Optional[int] = None, extra_registration: Optional[dict] = None, on_registered=None):
@@ -249,6 +254,36 @@ class PeerListener:
             except Exception:
                 pass
 
+    def _forward_natively(self, frame_type: str, content: str, record: dict) -> bool:
+        """A frame that reached the socket of an agy session is handed to agy as a user turn, like a
+        sender on the native path would: direct messages always, thread posts only when they
+        mention this session, @all or [stop]. False leaves it to the inbox."""
+        conversation = self.extra_registration.get("agyConversationId")
+        if frame_type != "user" or not conversation or not content:
+            return False
+        try:
+            from .native import get_native
+            from .sender import _PEER_NOTE
+            from .thread import _mentions
+
+            native = get_native(self.agent_type)
+            if native is None:
+                return False
+            if _THREAD_POST.match(content) and not _mentions(content, self.name):
+                return False
+            wire_content = content + _PEER_NOTE
+            if not native.send({native.REGISTRY_FIELD: conversation}, wire_content):
+                return False
+        except Exception:
+            return False
+        # Global audit only: a per-session inbox copy would make its next `wait` return it again.
+        # Best effort - the turn is delivered already.
+        try:
+            append_inbox({**record, "content": wire_content, "raw": {"transport": "agy-ls"}})
+        except Exception:
+            pass
+        return True
+
     def process_incoming_frame(self, frame: dict):
         frame_type = frame.get("type")
         from_sender = frame.get("from", "unknown")
@@ -275,6 +310,8 @@ class PeerListener:
             "content": content,
             "raw": frame
         }
+        if self._forward_natively(frame_type, content, record):
+            return
         append_inbox(record, session_name=to_name, session_pid=to_pid)
 
         # Extract cleaner sender label if present in XML tags or urgency brackets

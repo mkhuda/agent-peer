@@ -12,6 +12,7 @@ from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .native import get_native
 from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only
+from .codex_queue import thread_cwd
 from .join import run_join
 from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
@@ -177,8 +178,8 @@ def cmd_listen(args):
     # was given manually, so it always reflects the real calling harness.
     harness, harness_pid = detect_harness_identity()
     codex_thread_id = args.codex_thread or os.environ.get("CODEX_THREAD_ID")
-    # Prefer the harness process's own stable cwd over this subprocess's own.
-    cwd = args.cwd or (get_harness_cwd(harness_pid) if harness_pid else None)
+    # A Codex thread knows its own cwd; otherwise prefer the harness process's stable cwd over ours.
+    cwd = args.cwd or thread_cwd(codex_thread_id) or (get_harness_cwd(harness_pid) if harness_pid else None)
     native = get_native(harness)
     listener = PeerListener(
         name=name,

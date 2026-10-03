@@ -5,6 +5,7 @@ so `agent-peer listen` run inside agy reads them from its own environment. The t
 kept only in a 0600 file under ~/.agent-peer/agy-ls/, never in the registry, a log or a message.
 Everything here fails safe: `send` returns None whenever the generic socket path should be used.
 """
+import http.client
 import json
 import os
 import re
@@ -25,6 +26,8 @@ _SERVICE = "exa.language_server_pb.LanguageServerService"
 _MODEL_LOOKUP_TIMEOUT = 15.0  # GetCascadeTrajectory carries the whole history, 1.4-2 s on a long conversation
 _SEND_TIMEOUT = 5.0
 _MODEL_CACHE_SECONDS = 60.0  # a model switched inside this window is picked up one turn late
+_STALE_MODEL_SECONDS = 600.0  # only after a dropped read; a model switched meanwhile is overridden for that turn
+_TRANSIENT = (http.client.HTTPException, ConnectionError)  # a truncated or dropped read; timeouts are not retried
 _FALLBACK_LOG_LINES = 50
 _ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
@@ -202,12 +205,12 @@ def _model_cache_path(conversation: str) -> str:
     return os.path.join(_endpoints_dir(), f"{conversation}.model")
 
 
-def _cached_model(endpoint: Dict[str, Any], conversation: str) -> Optional[str]:
+def _cached_model(endpoint: Dict[str, Any], conversation: str, max_age: float = _MODEL_CACHE_SECONDS) -> Optional[str]:
     try:
         with open(_model_cache_path(conversation), "r", encoding="utf-8") as f:
             cached = json.load(f)
         if (cached.get("addr") == endpoint.get("addr") and isinstance(cached.get("model"), str)
-                and 0 <= time.time() - float(cached.get("at", 0)) < _MODEL_CACHE_SECONDS):
+                and 0 <= time.time() - float(cached.get("at", 0)) < max_age):
             return cached["model"]
     except (OSError, ValueError, AttributeError, TypeError):
         pass
@@ -220,7 +223,20 @@ def _conversation_model(endpoint: Dict[str, Any], conversation: str) -> Optional
     cached = _cached_model(endpoint, conversation)
     if cached:
         return cached
-    trajectory = _rpc(endpoint, "GetCascadeTrajectory", {"cascadeId": conversation}, _MODEL_LOOKUP_TIMEOUT)
+    deadline = time.monotonic() + _MODEL_LOOKUP_TIMEOUT
+    try:
+        try:
+            trajectory = _rpc(endpoint, "GetCascadeTrajectory", {"cascadeId": conversation}, _MODEL_LOOKUP_TIMEOUT)
+        except _TRANSIENT:
+            remaining = deadline - time.monotonic()
+            if remaining < 1.0:
+                raise
+            trajectory = _rpc(endpoint, "GetCascadeTrajectory", {"cascadeId": conversation}, remaining)
+    except _TRANSIENT:
+        stale = _cached_model(endpoint, conversation, _STALE_MODEL_SECONDS)
+        if stale:
+            return stale
+        raise
     chat_model = _find(trajectory, "chatModel")
     candidates = [chat_model.get("model") if isinstance(chat_model, dict) else chat_model,
                   _find(trajectory, "generatorModel"), _find(trajectory, "planModel")]

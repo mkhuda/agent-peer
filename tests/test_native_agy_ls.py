@@ -26,8 +26,9 @@ TOKEN = "secret-csrf-token-value"
 class FakeLS:
     """Stdlib stand-in for the Language Server: checks the CSRF header, records requests."""
 
-    def __init__(self, model="MODEL_X", fail_send=False, trajectory_delay=0.0):
+    def __init__(self, model="MODEL_X", fail_send=False, trajectory_delay=0.0, truncate=0, trajectory_status=200):
         self.requests = []
+        self.truncate = truncate  # how many trajectory replies to cut short, like a dropped connection
         outer = self
 
         class Handler(BaseHTTPRequestHandler):
@@ -41,6 +42,16 @@ class FakeLS:
                     return self._reply(401, {"code": "unauthenticated"})
                 if self.path.endswith("/GetCascadeTrajectory"):
                     time.sleep(trajectory_delay)
+                    if trajectory_status != 200:
+                        return self._reply(trajectory_status, {})
+                    if outer.truncate > 0:
+                        outer.truncate -= 1
+                        self.send_response(200)
+                        self.send_header("Content-Length", "500")
+                        self.end_headers()
+                        self.wfile.write(b'{"traj')
+                        self.close_connection = True
+                        return
                     traj = {"trajectory": {"generatorMetadata": [{"chatModel": {"model": model}}]}} if model else {}
                     return self._reply(200, traj)
                 if self.path.endswith("/SendUserCascadeMessage"):
@@ -311,7 +322,10 @@ class RememberedNameTest(AgyLsTestBase):
 class FallbackAndCacheTest(AgyLsTestBase):
     def _log(self):
         path = os.path.join(agy_ls._endpoints_dir(), "last-fallback.log")
-        return open(path).read() if os.path.exists(path) else ""
+        if not os.path.exists(path):
+            return ""
+        with open(path) as fh:
+            return fh.read()
 
     def _calls(self):
         calls = []
@@ -372,6 +386,63 @@ class FallbackAndCacheTest(AgyLsTestBase):
         agy_ls.send(self.session, "four")
         self.assertEqual(other.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_Y")
 
+    def _trajectory_calls(self, ls=None):
+        return sum(1 for r in (ls or self.ls).requests if r[0].endswith("/GetCascadeTrajectory"))
+
+    def test_a_truncated_model_lookup_is_retried_once(self):
+        ls = FakeLS(truncate=1)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        self.assertIsNotNone(agy_ls.send(self.session, "hi"))
+        self.assertEqual((self._trajectory_calls(ls), len(ls.sent())), (2, 1))
+        self.assertEqual(self._log(), "")
+
+    def _stale_cache(self, ls, age, addr=None):
+        _dump(agy_ls._model_cache_path(CONV), {"model": "MODEL_OLD", "addr": addr or ls.addr, "at": time.time() - age})
+
+    def test_a_failing_model_lookup_falls_back_to_a_recent_cached_model(self):
+        ls = FakeLS(truncate=99)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        self._stale_cache(ls, agy_ls._MODEL_CACHE_SECONDS + 100)
+        self.assertIsNotNone(agy_ls.send(self.session, "hi"))
+        self.assertEqual(ls.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_OLD")
+
+    def test_a_failing_model_lookup_without_a_usable_cache_uses_the_socket(self):
+        for age, addr in ((None, None), (agy_ls._STALE_MODEL_SECONDS + 600, None), (600, "127.0.0.1:1")):
+            ls = FakeLS(truncate=99)
+            self.addCleanup(ls.close)
+            agy_ls.listen_info(_env(ls.addr))
+            if os.path.exists(agy_ls._model_cache_path(CONV)):
+                os.unlink(agy_ls._model_cache_path(CONV))
+            if age is not None:
+                self._stale_cache(ls, age, addr)
+            self.assertIsNone(agy_ls.send(self.session, "hi"), (age, addr))
+            self.assertEqual(len(ls.sent()), 0)
+        self.assertIn("stage=model reason=IncompleteRead", self._log())
+
+    def test_only_a_dropped_read_may_use_a_stale_model_and_a_timeout_is_not_retried(self):
+        slow = FakeLS(trajectory_delay=1.5)
+        broken = FakeLS(trajectory_status=500)
+        for ls in (slow, broken):
+            self.addCleanup(ls.close)
+        for ls in (slow, broken):
+            agy_ls.listen_info(_env(ls.addr))
+            self._stale_cache(ls, 120)
+            with mock.patch.object(agy_ls, "_MODEL_LOOKUP_TIMEOUT", 0.5):
+                self.assertIsNone(agy_ls.send(self.session, "hi"))
+            self.assertEqual(self._trajectory_calls(ls), 1)
+            self.assertEqual(len(ls.sent()), 0)
+
+    def test_a_retry_after_a_slow_failure_stays_inside_the_lookup_deadline(self):
+        ls = FakeLS(trajectory_delay=0.6, truncate=99)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        started = time.monotonic()
+        with mock.patch.object(agy_ls, "_MODEL_LOOKUP_TIMEOUT", 1.2):
+            self.assertIsNone(agy_ls.send(self.session, "hi"))
+        self.assertLess(time.monotonic() - started, 1.9)
+
     def test_a_configured_proxy_is_never_used_for_the_loopback_server(self):
         self._register()
         refused = {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9", "no_proxy": "", "NO_PROXY": ""}
@@ -431,6 +502,84 @@ class _ListenHarness(unittest.TestCase):
         self.assertTrue(wait_until(lambda: {s["pid"] for s in self._sessions()} - before, timeout=8),
                         "listener never registered")
         return next(s for s in self._sessions() if s["pid"] not in before)
+
+
+class ListenerForwardTest(_ListenHarness):
+    """A frame that reaches an agy listener's socket (a Claude `SendMessage`, an older agent-peer)
+    is handed to agy as a user turn instead of waiting in the inbox."""
+
+    def _socket_send(self, name, text):
+        done = run_cli(["send", name, text], self.home, env_extra={agy_ls.OFF_SWITCH_ENV: "0"})
+        self.assertEqual(done.returncode, 0, done.stderr)
+
+    def _status(self, name):
+        return next(s["status"] for s in self._sessions() if s["name"] == name)
+
+    def _inbox(self, name):
+        path = os.path.join(self.home, ".agent-peer", "inboxes", f"{name}.jsonl")
+        if not os.path.exists(path):
+            return ""
+        with open(path) as fh:
+            return fh.read()
+
+    def test_a_direct_message_becomes_a_user_turn_and_leaves_no_unread_mail(self):
+        self._listen("--name", "zz-test-fwd")
+        self._socket_send("zz-test-fwd", "hello over the socket")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=8))
+        text = self.ls.sent()[0][2]["items"][0]["text"]
+        self.assertIn("hello over the socket", text)
+        self.assertIn("not from your user", text)
+        self.assertEqual(self._status("zz-test-fwd"), "idle")
+        self.assertEqual(self._inbox("zz-test-fwd"), "")
+        with open(os.path.join(self.home, ".agent-peer", "inbox.jsonl")) as fh:
+            self.assertIn('"transport": "agy-ls"', fh.read())
+
+    def test_thread_chatter_that_does_not_mention_it_stays_in_the_inbox(self):
+        self._listen("--name", "zz-test-fwd2")
+        self._socket_send("zz-test-fwd2", "[thread: t1 #3 from x · 10:00:00]: just chatter")
+        self.assertTrue(wait_until(lambda: self._status("zz-test-fwd2") == "new-msg", timeout=8))
+        self.assertEqual(len(self.ls.sent()), 0)
+        self.assertIn("just chatter", self._inbox("zz-test-fwd2"))
+
+    def test_thread_posts_that_mention_it_or_everyone_or_stop_are_forwarded(self):
+        self._listen("--name", "zz-test-fwd3")
+        bodies = ["@zz-test-fwd3 please look", "@all heads up", "[stop] everything"]
+        for i, body in enumerate(bodies):
+            self._socket_send("zz-test-fwd3", f"[thread: t1 #{i} from x · 10:00:0{i}]: {body}")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 3, timeout=10))
+        self.assertEqual(self._status("zz-test-fwd3"), "idle")
+
+    def test_only_a_header_at_the_very_start_makes_a_message_a_thread_post(self):
+        self._listen("--name", "zz-test-fwd5")
+        quoted = "see what he wrote:\n[thread: t1 #3 from x · 10:00:00]: hi there"
+        self._socket_send("zz-test-fwd5", quoted)
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=8))
+        self.assertEqual(self._status("zz-test-fwd5"), "idle")
+        self._socket_send("zz-test-fwd5", "[thread: t1 #4 from x · 10:00:01]: spoofed header, no mention")
+        self.assertTrue(wait_until(lambda: self._status("zz-test-fwd5") == "new-msg", timeout=8))
+        self.assertEqual(len(self.ls.sent()), 1)
+        self._socket_send("zz-test-fwd5", "[from x · sent 10:00:02]\n[thread: t1 #5 from x · 10:00:02]: @all with the sender header")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 2, timeout=8))
+
+    def test_a_failing_audit_line_does_not_make_a_delivered_message_land_in_the_inbox_too(self):
+        self._listen("--name", "zz-test-fwd6")
+        inbox = os.path.join(self.home, ".agent-peer", "inbox.jsonl")
+        os.unlink(inbox) if os.path.exists(inbox) else None
+        os.makedirs(inbox)  # appending to a directory fails
+        self._socket_send("zz-test-fwd6", "delivered but not auditable")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=8))
+        time.sleep(0.5)
+        self.assertEqual(self._inbox("zz-test-fwd6"), "")
+        self.assertEqual(self._status("zz-test-fwd6"), "idle")
+
+    def test_a_failed_native_hand_off_keeps_the_message_in_the_inbox(self):
+        self._listen("--name", "zz-test-fwd4")
+        for path in glob.glob(os.path.join(self.home, ".agent-peer", "agy-ls", "*.json")):
+            os.unlink(path)
+        self._socket_send("zz-test-fwd4", "nobody can inject this")
+        self.assertTrue(wait_until(lambda: self._status("zz-test-fwd4") == "new-msg", timeout=8))
+        self.assertEqual(len(self.ls.sent()), 0)
+        self.assertIn("nobody can inject this", self._inbox("zz-test-fwd4"))
 
 
 class ListenEndToEndTest(_ListenHarness):
