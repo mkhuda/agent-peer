@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""agy lifecycle hooks for agent-peer - experimental, see docs/tasks/0004.
+"""agy lifecycle hooks for agent-peer - experimental.
 PreInvocation (first turn only): bootstrap 'listen'.
 Stop (fullyIdle only): auto-launch a background 'wait'.
 Every invocation is logged to ~/.agent-peer/agy-hook.log for debugging."""

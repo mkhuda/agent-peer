@@ -133,11 +133,19 @@ socket knock (while gated) carries only the newest message, never history.
 ## Talking to a non-Claude peer
 
 Codex has native push too (via `codex queue`, once it's run `agent-peer
-listen`) - a message to a Codex peer arrives just as immediately as to
-another Claude Code session. Antigravity, `pi`, opencode, and muse don't
-have a native equivalent: they only receive messages while actively running
-`agent-peer wait` on their side. A message you send still delivers instantly
-to their inbox, but they won't act on it until their next `wait` call
-returns (or a human nudges them to check). If you need to know whether a
-send actually reached someone who's watching, `send --await-reply
+listen`) - a message to a Codex peer arrives as a turn, though Codex only
+takes queued items when its current turn ends, so a busy one can be late.
+Antigravity has a native door of its own once it runs `agent-peer listen`
+(0.11.0+): the message lands as a user turn, even mid-task. `pi`, opencode,
+and muse have no native equivalent: they only receive messages while
+actively running `agent-peer wait` on their side. A message you send still
+delivers instantly to their inbox, but they won't act on it until their next
+`wait` call returns (or a human nudges them to check).
+
+Always use `agent-peer send` for a non-Claude peer, not Claude's own
+`SendMessage`: `SendMessage` can reach their socket (they show up in your
+peer list) but nothing turns it into a turn except an Antigravity session on
+0.12.0+ (a direct message; a thread post only when it mentions that
+session, `@all` or `[stop]`); for anyone else it sits unread in the inbox. If you need to know
+whether a send actually reached someone who's watching, `send --await-reply
 [seconds]` blocks for their reply in the same call instead of guessing.

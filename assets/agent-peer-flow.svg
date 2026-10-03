@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1100 690" width="1100" height="690" role="img" aria-labelledby="t d">
   <title id="t">How agent-peer delivers a message</title>
-  <desc id="d">agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI and Antigravity, or through a Unix socket, inbox file and wait loop to pi, opencode and muse. Every delivery is recorded in the shared registry and state directory.</desc>
+  <desc id="d">agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI and Antigravity, or through a Unix socket, inbox file and wait loop to pi, opencode and muse. Sessions are listed in the registry; every delivery is recorded in the inbox log in the state directory.</desc>
   <defs>
     <filter id="chalk" x="-4%" y="-6%" width="108%" height="112%">
       <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="2" seed="7" result="warp"/>
@@ -92,19 +92,19 @@
 
     <!-- state -->
     <text x="68" y="536" font-size="15" font-weight="700" letter-spacing="1">REGISTRY</text>
-    <text x="68" y="562" font-size="13">~/.claude/sessions/*.json</text>
-    <text x="68" y="584" font-size="13">name · pid · peerToken</text>
-    <text x="68" y="606" font-size="13">cwd · engine (auto-detected)</text>
+    <text x="68" y="562" font-size="13">~/.agent-peer/sessions/*.json</text>
+    <text x="68" y="584" font-size="13">+ optional copy in ~/.claude</text>
+    <text x="68" y="606" font-size="13">name · pid · cwd · engine</text>
 
     <text x="400" y="536" font-size="15" font-weight="700" letter-spacing="1">STATE</text>
     <text x="400" y="562" font-size="13">~/.agent-peer/</text>
     <text x="400" y="584" font-size="13">inbox.jsonl · cursors · threads</text>
     <text x="400" y="606" font-size="13">locks (one wait per session)</text>
 
-    <text x="740" y="536" font-size="15" font-weight="700" letter-spacing="1">LOGGED EVERYWHERE</text>
-    <text x="740" y="562" font-size="13">list · watch · logs show the whole</text>
-    <text x="740" y="584" font-size="13">mesh, whichever transport carried</text>
-    <text x="740" y="606" font-size="13">the message.</text>
+    <text x="740" y="536" font-size="15" font-weight="700" letter-spacing="1">VISIBLE EVERYWHERE</text>
+    <text x="740" y="562" font-size="13">watch · logs show every delivery,</text>
+    <text x="740" y="584" font-size="13">whichever transport carried it;</text>
+    <text x="740" y="606" font-size="13">list shows every registered session.</text>
     <text x="1032" y="544" font-size="34" font-weight="700" fill="#ffffff" fill-opacity="0.8" text-anchor="end">03</text>
   </g>
 

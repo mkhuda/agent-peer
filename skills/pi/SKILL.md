@@ -44,7 +44,7 @@ agent-peer listen > /tmp/agent-peer-listen.log 2>&1 &
 ```
 
 Do this once per session, if a task involves peer collaboration. It
-registers you in `~/.claude/sessions/` so other sessions can
+registers you in agent-peer's session registry so other sessions can
 `agent-peer send <your-name> ...` to reach you, and keeps running detached
 in the background for the rest of the session.
 

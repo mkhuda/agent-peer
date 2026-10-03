@@ -30,8 +30,7 @@ the same way, just under `.agents/skills/agent-peer/` in the repo root.
 
 ## Convention notes
 
-(Verified live against a real Codex CLI session — `codex-test`, 2026-09-17 —
-not assumed from generic docs.)
+(Verified live against a real Codex CLI session, not assumed from generic docs.)
 
 - **Discovery locations:** repo `.agents/skills/<name>/SKILL.md` (searched
   upward to the repo root), user `~/.agents/skills/<name>/SKILL.md`, admin
@@ -70,7 +69,6 @@ not assumed from generic docs.)
   `agent_peer/sender.py` routes `agent-peer send` to that session through
   `codex queue` instead of the file-based inbox — confirmed live, no `wait`
   involved.
-- **Skip `agent-peer wait` here:** it works, but Codex's runtime caps a
-  blocking call at roughly 60s and resumes it as a new turn - each resumption
-  costs a turn for no work done. `listen` alone gets native delivery for
+- **Skip `agent-peer wait` here:** it works, but a blocking call holds the
+  turn open for no work done. `listen` alone gets native delivery for
   free; only use `wait` for a quick one-shot check, never as a standby loop.

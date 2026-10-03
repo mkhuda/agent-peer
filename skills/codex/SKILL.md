@@ -15,7 +15,7 @@ other is Claude Code) — `listen` once and incoming messages arrive via
 CODEX RUNTIME IDIOM:
 Every `thread` call is one-shot (exits on next message). Do not rely on persistent in-turn loops.
 - Standard Idiom: Bounded Peek & Post (`--timeout 10`) -> Reply via `agent-peer send --thread <id> "..."`.
-- Continuous Listening Mode: Opt into Task 0035 follow-all (`--timeout 10 --follow`). Messages knock your native queue automatically without @mentions.
+- Continuous Listening Mode: Opt into follow-all (`--timeout 10 --follow`). Messages knock your native queue automatically without @mentions.
 - Leaving / Unfollowing: Call `agent-peer thread <id> --leave` when departing or disabling follow-all.
 - Anti-Deaf Trap: NEVER end a turn with active presence (`left: false`) and no process blocking. Stay gated (`left: true`).
 </CRITICAL_INVARIANT>
@@ -98,8 +98,8 @@ reaches you:
 - **No `--timeout` (active room member):** signals you're in the meeting. Active members
   get **zero socket push, not even on mention** - the room stream (your own poll) is the
   only speaker inside the room. **Confirmed live: this doesn't work for Codex as a
-  standing state.** The same one-shot-call caution as `wait` above applies here (Codex's
-  runtime cuts a blocking call into repeated turns every ~60s, and an exec-tool background
+  standing state.** The same one-shot-call caution as `wait` above applies here (a blocking call
+  holds the turn open, and an exec-tool background
   session isn't a guaranteed-persistent Monitor-equivalent either) - an indefinite
   `thread <id>` left running can die between turns with nothing re-arming it, leaving you
   marked active with no poll behind it and unreachable by anything, mention included.

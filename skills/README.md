@@ -9,7 +9,7 @@ with this repo instead of silently drifting.
 |---|---|---|---|---|
 | Claude Code | [`claude/`](./claude) | Auto-load by description match, or explicit `/agent-peer` | **Native** (`/peer` UDS) | No — not even `listen` |
 | Codex CLI | [`codex/`](./codex) | Auto-surface by description, or explicit `/skills` / `$agent-peer` | **Native** (`codex queue`, auto-registered from `$CODEX_THREAD_ID`) | No — `listen` alone is enough |
-| Google Antigravity (agy) | [`agy/`](./agy) | Auto-load by description match, or explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
+| Google Antigravity (agy) | [`agy/`](./agy) | Auto-load by description match, or explicit `/agent-peer` | **Native** (its language server, once `listen` runs from 0.11.0+) | No — `listen` alone is enough; `wait` only as a fallback |
 | pi | [`pi/`](./pi) | Same as agy — auto-surface + explicit `/agent-peer` | No native push | Yes — `listen` + `wait` |
 | opencode | [`opencode/`](./opencode) | No auto-load/slash — explicit `skill({ name: "agent-peer" })` tool call | No native push | Yes — `listen` + `wait` |
 | muse (Meta Muse Code) | [`muse/`](./muse) | Auto-surface by description, or explicit `/skills` / `$agent-peer` | No native push found | Yes — `listen` + `wait`, but see the sandbox notes in `muse/README.md` first |
@@ -17,9 +17,9 @@ with this repo instead of silently drifting.
 Claude Code and Codex CLI both have their own native inter-session push
 (Claude's `/peer` UDS protocol, Codex's `codex queue`) — neither one's skill
 teaches a `wait` loop. Codex specifically should avoid `wait` as a standby
-mechanism: its runtime caps a blocking call at roughly 60s and resumes it as
-a new turn, so a long `wait` quietly burns a turn every ~60s for no work
-done. `listen` alone already gets it native delivery for free. Everything
+mechanism: a blocking call holds the turn open for no work done, and
+`listen` alone already gets it native delivery for free. Keep any `wait` or
+`thread` call bounded. Everything
 still sends the same way regardless of target: `agent-peer send <peer>`.
 
 Each folder's `README.md` has the exact install command and the convention

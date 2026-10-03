@@ -27,7 +27,7 @@ can find, message, and reactively wake up any other. No polling, no
 per-harness glue code.
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-flow.webp" alt="agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI, and Antigravity, or through a Unix socket, an inbox file, and a wait loop to pi, opencode, and muse. Every delivery is recorded in the shared registry and state directory." width="880" />
+  <img src="https://raw.githubusercontent.com/mkhuda/agent-peer/main/assets/agent-peer-flow.webp" alt="agent-peer send finds the target in the registry, then delivers natively to Claude Code, Codex CLI, and Antigravity, or through a Unix socket, an inbox file, and a wait loop to pi, opencode, and muse. Sessions are listed in the registry; every delivery is recorded in the inbox log in the state directory." width="880" />
 </p>
 
 No harness is the hub here. Claude Code and Codex CLI each already ship their
@@ -39,9 +39,10 @@ which `agent-peer send` uses once the session runs `listen` from agent-peer 0.11
 later, so it too is woken without `wait`. `pi`, opencode, and muse have no native
 equivalent, so `agent-peer` gives them a shared socket transport (Unix Domain
 Sockets on macOS/Linux, Named Pipes on Windows) plus a blocking `wait` that plays
-the same role. An Antigravity peer on an older agent-peer keeps using that path. Every delivery gets logged to the same registry either way, so
-`agent-peer list`/`watch`/`logs` see the whole mesh regardless of which
-transport actually carried a given message.
+the same role. An Antigravity peer on an older agent-peer keeps using that path. Every delivery gets recorded in the same inbox log either way, so
+`agent-peer watch`/`logs` see the whole mesh regardless of which
+transport actually carried a given message, and `agent-peer list` shows every
+registered session.
 
 ## Highlights
 
@@ -284,7 +285,19 @@ lands as an ordinary user turn - at once if agy is idle, at its next step if it 
 The conversation id is stable across a resume, so the session also gets its name back without
 `--name`. Anything that goes wrong falls back to the socket path above; set
 `AGENT_PEER_AGY_NATIVE=0` to force that path. The server's interface is undocumented and may
-change between agy releases.
+change between agy releases. A message that reaches an agy session's socket anyway - a Claude
+`SendMessage` to it, a sender on an older agent-peer - is handed to agy by the listener itself
+when the native hand-off succeeds (otherwise it stays in the inbox): a direct message is forwarded,
+a thread post only when it mentions that session, `@all` or `[stop]`.
+
+**The session registry.** A listener writes its own entry under `~/.agent-peer/sessions/`,
+named by the Codex thread or agy conversation when there is one, so a restart replaces the
+entry instead of leaving a stale one. When the Claude config directory (`~/.claude`, or `$CLAUDE_CONFIG_DIR`) already exists it also
+writes a copy in its `sessions/` folder, which older agent-peer releases and Claude's own peer list
+still read; without that directory, nothing is created there. `agent-peer list` and `send` resolve
+against both. A Codex session registers the working directory Codex recorded for its thread when
+Codex's database has it. `AGENT_PEER_CLAUDE_MIRROR=1` forces the copy, `=0` turns it off, and
+`AGENT_PEER_REGISTRY=legacy` goes back to the old single location (read and write).
 
 ## Docs
 

@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.12.0
+
+- **agent-peer keeps its own session registry.** A listener registers in `~/.agent-peer/sessions/` instead of
+  inside Claude Code's `~/.claude/sessions/`. A Codex thread or agy conversation names its entry, so a restart
+  replaces it rather than leaving a stale one. When the Claude config directory (`~/.claude`, or `$CLAUDE_CONFIG_DIR`)
+  already exists, a Claude-format copy is written there too, so older agent-peer releases and Claude's own peer list
+  keep seeing the session; without that directory `listen` no longer creates it.
+  `AGENT_PEER_CLAUDE_MIRROR=1` forces the copy (creating the directory), `=0` turns it off, and
+  `AGENT_PEER_REGISTRY=legacy` restores the old single location (read and write). `list` and `send` resolve against
+  both registries, `prune` removes dead entries from both, and `wait` clears the unread marker on every copy.
+  Nothing needs doing on upgrade: running sessions keep working and move to the new registry the next time they
+  run `agent-peer listen`.
+- **A message that reaches an Antigravity session's socket - sent with Claude's `SendMessage`, or by an older
+  agent-peer - is handed to agy as a user turn when the native hand-off succeeds.** The agy listener does it: a
+  direct message is forwarded; a thread post only when it mentions the session, `@all` or `[stop]`. If the hand-off
+  fails the message stays in the inbox as before. Previously such a message sat unread and left the session
+  showing `new-msg`.
+- **A Codex session registers the working directory Codex recorded for its thread** when Codex's database has it;
+  otherwise it falls back to the harness process's directory. Codex now runs one shared daemon, whose directory was
+  being shown for every session, so `list --cwd` and mentions by folder were wrong for them.
+- The agy model lookup retries a dropped read once. If it still fails, a model seen for the same language server
+  within the last ten minutes is used instead of falling back to the socket path; a timeout or an HTTP error never
+  uses it.
+- A listener stopped while it is still starting up removes what it registered, and removes its name link only while
+  it still points at its own socket. `prune` leaves the socket and name link of a replacement alone. Registering,
+  updating and removing entries is serialized across processes, waiting up to three seconds before it gives up
+  and proceeds.
+- `agent-peer list` words its empty and total lines without naming `~/.claude/sessions`.
+
 ## 0.11.2
 
 - **A thread mention now reaches an Antigravity session natively from a long-running `join`.** The fanout waits
@@ -329,12 +358,8 @@
 
 ## 0.5.2
 
-- **Fixed: a session could vanish from `list`/`send` even with no concurrent write happening.**
-  A native Claude Code session's own registry file (`~/.claude/sessions/<pid>.json`) was found with
-  a literal extra trailing `}` - confirmed persistent (5/5 consistent reads, no writer active during
-  the window), not a race, and not written by agent-peer's own code. `get_active_sessions()` now
-  falls back to `JSONDecoder().raw_decode()` to recover the leading valid object when `json.loads()`
-  rejects trailing garbage, instead of dropping the session entirely.
+- **Fixed: a session could vanish from `list`/`send`** when its registry file had stray text after the
+  JSON object. The leading valid object is now recovered instead of dropping the session.
 
 ## 0.5.1
 
@@ -419,7 +444,7 @@ this project has been verified rather than assumed.
   re-armed yet. Bare flag waits indefinitely; a timeout exits 1. Never touches the read cursor, so
   a later `wait` still delivers the same reply.
 - **Fixed: `agent-peer listen` could register a duplicate session for the same harness session** -
-  confirmed live (Codex thread registering as both `codex-8763` and `codex-8763-2`). `listen` now
+  (one Codex thread registering twice, under a second `-2` name). `listen` now
   recognizes a second call from the same harness session (matched by Codex thread id or
   `HERDR_PANE_ID`) and refuses, naming the already-running session, instead of minting a new one.
   `--force` keeps the old behavior for deliberate cases.

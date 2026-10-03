@@ -27,9 +27,7 @@ it the same way.
 
 ## Convention notes
 
-(Verified live against real muse sessions — `muse-test`/`muse-test2`,
-2026-09-20, full findings in `.dev/reviews/muse-review.md` — not assumed
-from docs.)
+(Verified live against real muse sessions, not assumed from docs.)
 
 - **Engine/name string:** muse's process `comm` reports something like
   `muse-bin-1.3.0-R3401.1` — `agent-peer`'s harness auto-detection normalises
