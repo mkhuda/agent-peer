@@ -2,10 +2,13 @@ import os
 import glob
 import json
 import re
+import threading
+import time
+from contextlib import contextmanager
 from typing import List, Dict, Optional, Tuple
 
 from . import compat
-from .protocol import AGENT_SESSIONS_DIR, SESSIONS_DIR, SOCKET_DIR, atomic_write_json, is_pid_alive, get_proc_start
+from .protocol import AGENT_SESSIONS_DIR, LOCKS_DIR, SESSIONS_DIR, SOCKET_DIR, atomic_write_json, is_pid_alive, get_proc_start
 from .codex_queue import queue_state
 
 _json_decoder = json.JSONDecoder()
@@ -78,46 +81,162 @@ def _apply_codex_queue_status(sessions: List[Dict]) -> None:
         if state and state[0] >= 1 and state[1] and now - state[1] >= _CODEX_BUSY_MIN_QUEUE_AGE_S:
             s["status"] = "busy"
 
-def session_paths(pid: int, key_filename: str) -> Tuple[str, str]:
-    """(json_path, key_path) a listener with this pid registers under."""
-    return os.path.join(SESSIONS_DIR, f"{pid}.json"), os.path.join(SESSIONS_DIR, key_filename)
+Copy = Tuple[str, Optional[str]]  # (json path, key file path) of one copy of an entry
 
 
-def ensure_sessions_dir() -> None:
-    os.makedirs(SESSIONS_DIR, exist_ok=True)
+def _registry_mode() -> str:
+    return "legacy" if os.environ.get("AGENT_PEER_REGISTRY") == "legacy" else "own"
 
 
-def write_key(key_path: str, key_data: Dict) -> None:
-    with open(key_path, "w", encoding="utf-8") as f:
-        json.dump(key_data, f)
-    compat.secure_file(key_path)
+def _mirror_wanted() -> bool:
+    """Claude's directory gets a copy only where Claude Code is (or when forced), so senders
+    older than the own registry still find the listener."""
+    flag = os.environ.get("AGENT_PEER_CLAUDE_MIRROR")
+    if flag in ("0", "1"):
+        return flag == "1"
+    return os.path.isdir(os.path.dirname(SESSIONS_DIR))
 
 
-def write_session(json_path: str, meta: Dict) -> None:
-    atomic_write_json(json_path, meta)
+def _safe_name(value: str) -> str:
+    """Injective and path-safe: every byte outside [A-Za-z0-9-] becomes _xx."""
+    return "".join(chr(b) if re.match(r"[A-Za-z0-9-]", chr(b)) else f"_{b:02x}" for b in value.encode("utf-8"))
 
 
-def update_session(json_path: str, fields: Dict) -> bool:
-    """Merge `fields` into an existing entry; False when the entry is gone."""
-    if not os.path.exists(json_path):
-        return False
-    with open(json_path, "r", encoding="utf-8") as f:
-        meta = json.load(f)
-    meta.update(fields)
-    atomic_write_json(json_path, meta)
-    return True
+try:
+    import fcntl
+except ImportError:  # Windows
+    fcntl = None
+
+_LOCAL_LOCK = threading.RLock()
+_lock_depth = 0
 
 
-def remove_session(json_path: Optional[str], key_path: Optional[str]) -> List[str]:
-    """Delete an entry's json and key file; returns the paths actually removed."""
-    removed = []
-    for p in (json_path, key_path):
-        if p and (os.path.exists(p) or os.path.islink(p)):
+def _acquire_file_lock(path: str, deadline: float):
+    """flock where available (released by the OS if the holder dies), else compat.acquire_lock."""
+    if fcntl is None:
+        while True:
+            handle = compat.acquire_lock(path)
+            if handle or time.monotonic() >= deadline:
+                return handle, compat.release_lock
+            time.sleep(0.02)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        while True:
             try:
-                os.unlink(p)
-                removed.append(p)
+                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                held, fd = fd, None
+                return held, os.close
+            except OSError:
+                if time.monotonic() >= deadline:
+                    return None, None
+                time.sleep(0.02)
+    finally:
+        if fd is not None:
+            os.close(fd)
+
+
+@contextmanager
+def _registry_lock(timeout: float = 3.0):
+    """Serializes register, update and remove. Re-entrant in-process (a signal handler may run
+    cleanup while this thread holds it); after `timeout` it proceeds unlocked, the sessionId
+    ownership check still applies."""
+    global _lock_depth
+    with _LOCAL_LOCK:
+        if _lock_depth:
+            _lock_depth += 1
+            try:
+                yield
+            finally:
+                _lock_depth -= 1
+            return
+        held, release = None, None
+        _lock_depth = 1  # set first: a signal handler's cleanup during acquisition must not wait for us
+        try:
+            try:
+                os.makedirs(LOCKS_DIR, exist_ok=True)
+                held, release = _acquire_file_lock(os.path.join(LOCKS_DIR, "registry.lock"), time.monotonic() + timeout)
             except OSError:
                 pass
+            yield
+        finally:
+            _lock_depth = 0
+            if held is not None and release is not None:
+                release(held)
+
+
+def session_paths(pid: int, key_filename: str, stable_key: Optional[Tuple[str, str]] = None) -> List[Copy]:
+    """Where a listener registers: its own entry first, then the Claude-format mirror."""
+    claude = (os.path.join(SESSIONS_DIR, f"{pid}.json"), os.path.join(SESSIONS_DIR, key_filename))
+    if _registry_mode() == "legacy":
+        return [claude]
+    stem = f"{stable_key[0]}.{_safe_name(stable_key[1])}" if stable_key else f"pid.{pid}"
+    own = (os.path.join(AGENT_SESSIONS_DIR, f"{stem}.json"), os.path.join(AGENT_SESSIONS_DIR, f"{stem}.key"))
+    return [own, claude] if _mirror_wanted() else [own]
+
+
+def ensure_sessions_dir(copies: List[Copy]) -> None:
+    for directory in dict.fromkeys(os.path.dirname(json_path) for json_path, _ in copies):
+        existed = os.path.isdir(directory)
+        os.makedirs(directory, exist_ok=True)
+        if not existed and directory == AGENT_SESSIONS_DIR:
+            compat.secure_dir(directory)
+
+
+def register_session(copies: List[Copy], key_data: Dict, meta: Dict) -> None:
+    """Write each copy's key file, then its json."""
+    with _registry_lock():
+        for json_path, key_path in copies:
+            with open(key_path, "w", encoding="utf-8") as f:
+                json.dump(key_data, f)
+            compat.secure_file(key_path)
+            atomic_write_json(json_path, meta)
+
+
+def _owned_by(json_path: str, session_id: Optional[str]) -> bool:
+    """False when the file now belongs to a different listener (same stable key, newer start)."""
+    if session_id is None:
+        return True
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            return json.load(f).get("sessionId") in (None, session_id)
+    except Exception:
+        return True
+
+
+def update_session(copies: List[Copy], fields: Dict, session_id: Optional[str] = None) -> bool:
+    """Merge `fields` into every existing copy; False when none was updated."""
+    updated = False
+    with _registry_lock():
+        for json_path, _ in copies:
+            if not os.path.exists(json_path) or not _owned_by(json_path, session_id):
+                continue
+            with open(json_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            meta.update(fields)
+            atomic_write_json(json_path, meta)
+            updated = True
+    return updated
+
+
+def is_superseded(copies: List[Copy], session_id: Optional[str]) -> bool:
+    """True when a copy now belongs to another listener (it took over the stable key or the pid)."""
+    return any(os.path.exists(json_path) and not _owned_by(json_path, session_id) for json_path, _ in copies)
+
+
+def remove_session(copies: List[Copy], session_id: Optional[str] = None) -> List[str]:
+    """Delete each copy's json and key file; returns the paths actually removed."""
+    removed = []
+    with _registry_lock():
+        for json_path, key_path in copies:
+            if os.path.exists(json_path) and not _owned_by(json_path, session_id):
+                continue
+            for p in (json_path, key_path):
+                if p and (os.path.exists(p) or os.path.islink(p)):
+                    try:
+                        os.unlink(p)
+                        removed.append(p)
+                    except OSError:
+                        pass
     return removed
 
 
@@ -193,6 +312,7 @@ def _read_entries(directory: str, source: str) -> List[Dict]:
         sock_path = data.get("messagingSocketPath") or os.path.join(SOCKET_DIR, f"{pid}.sock")
         data["messagingSocketPath"] = sock_path
         data["socketExists"] = os.path.exists(sock_path)
+        data["copies"] = [(json_path, data["keyFile"])]
         entries.append(data)
     return entries
 
@@ -212,10 +332,12 @@ def _merge_entries(entries: List[Dict]) -> List[Dict]:
             if sid:
                 by_listener[(sid, entry["pid"])] = entry
             merged.append(entry)
-        elif (entry.get("statusUpdatedAt") or 0) > (kept.get("statusUpdatedAt") or 0):
-            for field in _STATUS_FIELDS:
-                if field in entry:
-                    kept[field] = entry[field]
+        else:
+            kept["copies"].extend(entry["copies"])
+            if (entry.get("statusUpdatedAt") or 0) > (kept.get("statusUpdatedAt") or 0):
+                for field in _STATUS_FIELDS:
+                    if field in entry:
+                        kept[field] = entry[field]
 
     # One pid, one entry: after a pid is reused only the newer listener counts.
     newest: Dict[int, Dict] = {}

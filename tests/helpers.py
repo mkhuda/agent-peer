@@ -33,10 +33,11 @@ _IDENTITY_VARS = ("CLAUDE_CONFIG_DIR", "CODEX_THREAD_ID", "HERDR_ENV", "HERDR_PA
 def isolated_env(home, **extra):
     """Environment that keeps a child process inside `home` and its socket directory, with
     the caller's own harness identity removed; `extra` opts specific variables back in."""
-    env = dict(os.environ, HOME=home)
+    env = dict(os.environ, HOME=home, USERPROFILE=home)
     for key in list(env):
         if key in _IDENTITY_VARS or key.startswith(("ANTIGRAVITY_", "AGENT_PEER_")):
             del env[key]
+    env["AGENT_PEER_CLAUDE_MIRROR"] = "1"  # most tests look for a listener in Claude's directory
     env.update(extra)
     if home in _SOCKET_DIRS:
         env["AGENT_PEER_SOCKET_DIR"] = _SOCKET_DIRS[home]

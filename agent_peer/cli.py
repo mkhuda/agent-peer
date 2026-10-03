@@ -6,7 +6,7 @@ import time
 
 from . import compat
 
-from .registry import get_active_sessions, remove_session, resolve_session, update_session
+from .registry import get_active_sessions, is_superseded, remove_session, resolve_session, update_session
 from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
@@ -95,12 +95,16 @@ def cmd_prune(args):
     for s in dead:
         pid = s.get("pid")
         name = s.get("name") or "(untitled)"
-        removed = remove_session(s.get("jsonPath"), s.get("keyFile"))
+        superseded = is_superseded(s.get("copies") or [], s.get("sessionId"))
+        removed = remove_session(s.get("copies") or [], s.get("sessionId"))
         paths = []
-        if not compat.IS_WINDOWS:
+        if not compat.IS_WINDOWS and not superseded and not compat.is_pid_alive(pid):  # alive now = pid reused
             # Named Pipes aren't filesystem entries - nothing to unlink, and
             # messagingSocketPath is just a pipe id there, not a real path.
-            paths += [s.get("messagingSocketPath"), os.path.join(SOCKET_DIR, f"{name}.sock")]
+            link = os.path.join(SOCKET_DIR, f"{name}.sock")
+            paths.append(s.get("messagingSocketPath"))
+            if os.path.islink(link) and os.readlink(link) == s.get("messagingSocketPath"):
+                paths.append(link)  # a replacement listener may own this name now
         for p in paths:
             if not p:
                 continue
@@ -239,7 +243,7 @@ def _reset_status_idle(session: str):
     listener.py sets 'new-msg' but never clears it on its own."""
     try:
         session_data, _, _ = resolve_session(session)
-        update_session(session_data["jsonPath"], {"status": "idle", "statusUpdatedAt": int(time.time() * 1000)})
+        update_session(session_data["copies"], {"status": "idle", "statusUpdatedAt": int(time.time() * 1000)}, session_data.get("sessionId"))
     except Exception:
         pass
 

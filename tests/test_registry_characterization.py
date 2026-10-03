@@ -46,6 +46,8 @@ class RegistryCharacterizationTest(unittest.TestCase):
         return {
             "json": os.path.join(self.sessions, f"{pid}.json"),
             "key": keys[0] if keys else os.path.join(self.sessions, f"{pid}.MISSING.key"),
+            "own_json": os.path.join(self.home, ".agent-peer", "sessions", f"pid.{pid}.json"),
+            "own_key": os.path.join(self.home, ".agent-peer", "sessions", f"pid.{pid}.key"),
             "sock": os.path.join(socks, f"{pid}.sock"),
             "link": os.path.join(socks, f"{name}.sock"),
         }
@@ -99,7 +101,7 @@ class RegistryCharacterizationTest(unittest.TestCase):
         self.assertTrue(wait_until(lambda: (self._row("zz-char-d") or [None] * 5)[4] == "no", timeout=5))
         pruned = run_cli(["prune"], self.home)
         self.assertEqual(pruned.returncode, 0, pruned.stderr)
-        self.assertIn("removed 4 file(s)", pruned.stdout)
+        self.assertIn("removed 6 file(s)", pruned.stdout)
         for label, path in files.items():
             self.assertFalse(os.path.exists(path) or os.path.islink(path), f"{label} survived prune: {path}")
         self.assertIsNone(self._row("zz-char-d"))

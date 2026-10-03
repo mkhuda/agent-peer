@@ -12,7 +12,7 @@ import subprocess
 # Bundle id to activate on notification click (terminal-notifier path only) -
 # see docs/notification-click-target.md.
 NOTIFY_ACTIVATE_BUNDLE_ID = "com.googlecode.iterm2"
-from typing import Optional
+from typing import Optional, Tuple
 
 from .protocol import (
     SOCKET_DIR,
@@ -23,7 +23,7 @@ from .protocol import (
     harness_session_uid,
 )
 from .inbox import append_inbox, mark_session_start
-from .registry import ensure_sessions_dir, remove_session, session_paths, update_session, write_key, write_session
+from .registry import ensure_sessions_dir, register_session, remove_session, session_paths, update_session
 from . import compat
 
 
@@ -57,15 +57,22 @@ class PeerListener:
         self.symlink_path = _socket_address(self.name)
         self.key_filename = generate_key_filename(self.pid, self.sock_path)
         
-        self.json_path, self.key_path = session_paths(self.pid, self.key_filename)
+        self.copies = session_paths(self.pid, self.key_filename, self._stable_key())
+        self.json_path, self.key_path = self.copies[0]
         
         self.server_sock = None
         self.running = False
         self._cleaned_up = False
 
+    def _stable_key(self) -> Optional[Tuple[str, str]]:
+        if self.codex_thread_id:
+            return ("codex", self.codex_thread_id)
+        conversation = self.extra_registration.get("agyConversationId")
+        return ("agy", conversation) if conversation else None
+
     def setup(self):
         ensure_dirs()
-        ensure_sessions_dir()  # only a registering listener may create Claude's directory
+        ensure_sessions_dir(self.copies)  # only a registering listener creates these directories
         proc_start = get_proc_start(self.pid)
         now_ms = int(time.time() * 1000)
 
@@ -125,15 +132,12 @@ class PeerListener:
             except OSError:
                 pass
 
-        # 4. Write key file
+        # 4. Register: key file and session json, every copy
         key_data = {
             "peerToken": self.peer_token,
             "procStart": proc_start,
             "pidDomain": "win32" if compat.IS_WINDOWS else "darwin"
         }
-        write_key(self.key_path, key_data)
-
-        # 5. Write session json
         session_data = {
             "pid": self.pid,
             "harnessPid": self.harness_pid,
@@ -156,6 +160,8 @@ class PeerListener:
             ],
             "kind": "interactive",
             "entrypoint": "cli",
+            "transport": "socket",
+            "registryVersion": 1,
             "pidDomain": "win32" if compat.IS_WINDOWS else "darwin",
             "messagingSocketPath": self.sock_path,
             "name": self.name,
@@ -171,7 +177,7 @@ class PeerListener:
             session_data["harnessSessionUid"] = self.harness_uid
         for key, value in self.extra_registration.items():
             session_data.setdefault(key, value)
-        write_session(self.json_path, session_data)
+        register_session(self.copies, key_data, session_data)
         if self.on_registered:
             self.on_registered(self.name)
 
@@ -201,7 +207,7 @@ class PeerListener:
                     os.unlink(p)
                 except OSError:
                     pass
-        remove_session(self.json_path, self.key_path)
+        remove_session(self.copies, self.session_id)
 
     def handle_client(self, client: socket.socket):
         client.settimeout(5.0)
@@ -291,12 +297,12 @@ class PeerListener:
         # 1. Update session json with title & status (agent-ps sees this!)
         try:
             now_ms = int(time.time() * 1000)
-            update_session(self.json_path, {
+            update_session(self.copies, {
                 "title": f"📬 [{sender_label}]: {clean_snippet}",
                 "status": "new-msg",
                 "updatedAt": now_ms,
                 "statusUpdatedAt": now_ms,
-            })
+            }, self.session_id)
         except Exception:
             pass
 
@@ -337,7 +343,11 @@ class PeerListener:
         # Before setup() publishes the registration, so a stop during start-up still cleans up.
         signal.signal(signal.SIGINT, _signal_handler)
         signal.signal(signal.SIGTERM, _signal_handler)
-        self.setup()
+        try:
+            self.setup()
+        except BaseException:
+            self.cleanup()
+            raise
         self.running = True
 
         print(f"🚀 agent-peer listener active:")
