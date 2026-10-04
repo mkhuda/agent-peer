@@ -63,6 +63,12 @@ def run_cli(args, home, timeout=10, input=None, env_extra=None):
     )
 
 
+def run_py(home, code, timeout=30):
+    """Run a snippet of Python against this tree with the same isolation as run_cli."""
+    return subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=isolated_env(home),
+                          capture_output=True, text=True, timeout=timeout)
+
+
 def spawn_cli(args, home, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env_extra=None):
     """Start the CLI in the background; caller must stop_cli() it."""
     env = isolated_env(home, **(env_extra or {}))

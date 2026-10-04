@@ -31,7 +31,7 @@ from . import compat
 ACTIVE_DEAD_GRACE_SECONDS = 30.0
 FANOUT_BUDGET_SECONDS = 3.0
 # agy native pushes read the conversation first (1.4-2 s on a long one); a short-lived poster must not cut them off.
-FANOUT_AGY_BUDGET_SECONDS = 6.0
+FANOUT_AGY_BUDGET_SECONDS = 12.0
 # Only a cap, not a fixed wait: the poster leaves as soon as its workers
 # finish. A `codex queue` is a separate process that must start and connect to
 # Codex's app-server; on a loaded machine that measured up to ~2.9s before the
@@ -289,13 +289,17 @@ def _push_one(name: str, pid: int, frame: str, sender: str, native: bool = True)
             continue  # a dead/unreachable target must never fail the poster
 
 
-def _agy_native_names() -> set:
-    """Names of live agy sessions that advertise a conversation (reachable through agy's language server)."""
+def _agy_native_conversations() -> dict:
+    """name -> conversation id of live agy sessions that advertise one (reachable through agy's language server)."""
     try:
-        return {s.get("name") for s in get_active_sessions()
+        return {s.get("name"): s.get("agyConversationId") for s in get_active_sessions()
                 if str(s.get("agentType") or "").upper() == "AGY" and s.get("agyConversationId") and s.get("name")}
     except Exception:
-        return set()
+        return {}
+
+
+def _agy_native_names() -> set:
+    return set(_agy_native_conversations())
 
 
 def _codex_sessions() -> Dict[str, Optional[str]]:
@@ -400,10 +404,12 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         if not targets:
             return
         codex_sessions = _codex_sessions()
-        agy_names = _agy_native_names()
+        agy_conversations = _agy_native_conversations()
+        agy_names = set(agy_conversations)
         registered = _registered_names()
         human = registered is not None and sender not in registered
         workers = []
+        worker_names = {}
         codex_workers = set()
         agy_workers = set()
         for name, pid in targets:
@@ -429,6 +435,7 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
             worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender, native), daemon=True)
             worker.start()
             workers.append(worker)
+            worker_names[worker] = name
             if name in codex_sessions:
                 codex_workers.add(worker)
             elif name in agy_names and native:
@@ -438,9 +445,12 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
             limit = (FANOUT_CODEX_BUDGET_SECONDS if worker in codex_workers
                      else FANOUT_AGY_BUDGET_SECONDS if worker in agy_workers else FANOUT_BUDGET_SECONDS)
             remaining = started + limit - time.time()
-            if remaining <= 0:
-                continue
-            worker.join(timeout=remaining)
+            if remaining > 0:
+                worker.join(timeout=remaining)
+            if worker in agy_workers and worker.is_alive():
+                # The poster exits next and takes this worker with it: leave a trace of the lost push.
+                from .native.agy_ls import note_fallback
+                note_fallback(agy_conversations.get(worker_names[worker], "?"), "budget")
     except Exception:
         pass
 

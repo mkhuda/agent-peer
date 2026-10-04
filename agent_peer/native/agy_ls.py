@@ -25,6 +25,9 @@ _ENV_CONVERSATION = "ANTIGRAVITY_CONVERSATION_ID"
 _SERVICE = "exa.language_server_pb.LanguageServerService"
 _MODEL_LOOKUP_TIMEOUT = 15.0  # GetCascadeTrajectory carries the whole history, 1.4-2 s on a long conversation
 _SEND_TIMEOUT = 5.0
+_TAIL_TIMEOUT = 3.0  # per call of the cheap model lookup
+_TAIL_DEADLINE = 4.0  # for all of its calls together; anything slower falls back to the full history
+_TAIL_STEPS = (5, 50)  # how many recent steps to read, widened once, before reading the whole history
 _MODEL_CACHE_SECONDS = 60.0  # a model switched inside this window is picked up one turn late
 _STALE_MODEL_SECONDS = 600.0  # only after a dropped read; a model switched meanwhile is overridden for that turn
 _TRANSIENT = (http.client.HTTPException, ConnectionError)  # a truncated or dropped read; timeouts are not retried
@@ -177,6 +180,24 @@ def _find(obj: Any, key: str) -> Any:
     return None
 
 
+def _find_last(obj: Any, key: str) -> Any:
+    """The last value stored under `key` (a string or an object), in document order."""
+    found = None
+    if isinstance(obj, dict):
+        if key in obj and isinstance(obj[key], (str, dict)):
+            found = obj[key]
+        children = list(obj.values())
+    elif isinstance(obj, list):
+        children = obj
+    else:
+        return None
+    for child in children:
+        hit = _find_last(child, key)
+        if hit is not None:
+            found = hit
+    return found
+
+
 def note_fallback(conversation: str, stage: str, exc: Optional[BaseException] = None, started: Optional[float] = None) -> None:
     """One line saying why the native door was not used (no token, no message text); best effort."""
     try:
@@ -217,12 +238,54 @@ def _cached_model(endpoint: Dict[str, Any], conversation: str, max_age: float = 
     return None
 
 
+def _remember_model(endpoint: Dict[str, Any], conversation: str, model: str) -> None:
+    try:
+        tmp = f"{_model_cache_path(conversation)}.tmp.{os.getpid()}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump({"model": model, "addr": endpoint.get("addr"), "at": time.time()}, f)
+        os.replace(tmp, _model_cache_path(conversation))
+    except OSError:
+        pass
+
+
+def _model_from_recent_steps(endpoint: Dict[str, Any], conversation: str) -> Optional[str]:
+    """The model of the latest generation, read from the last few steps: two small calls instead of the
+    whole history, which on a long conversation is tens of megabytes. None = ask the full history."""
+    deadline = time.monotonic() + _TAIL_DEADLINE
+
+    def budget() -> float:
+        return min(_TAIL_TIMEOUT, deadline - time.monotonic())
+
+    try:
+        summaries = _rpc(endpoint, "GetAllCascadeTrajectories", {}, budget()).get("trajectorySummaries")
+        count = (summaries or {}).get(conversation, {}).get("stepCount")
+        if not isinstance(count, int) or count <= 0:
+            return None
+        for window in _TAIL_STEPS:
+            if budget() < 0.3:
+                return None
+            steps = _rpc(endpoint, "GetCascadeTrajectorySteps",
+                         {"cascadeId": conversation, "stepOffset": max(count - window, 0)}, budget())
+            for key in ("generatorModel", "planModel"):
+                hit = _find_last(steps, key)
+                if isinstance(hit, str) and hit:
+                    return hit
+    except Exception:
+        pass
+    return None
+
+
 def _conversation_model(endpoint: Dict[str, Any], conversation: str) -> Optional[str]:
     """The conversation's own model enum; its names change per agy version, so never hardcoded.
     Cached briefly per conversation and LS address: the lookup reads the whole history."""
     cached = _cached_model(endpoint, conversation)
     if cached:
         return cached
+    recent = _model_from_recent_steps(endpoint, conversation)
+    if recent:
+        _remember_model(endpoint, conversation, recent)
+        return recent
     deadline = time.monotonic() + _MODEL_LOOKUP_TIMEOUT
     try:
         try:
@@ -242,14 +305,7 @@ def _conversation_model(endpoint: Dict[str, Any], conversation: str) -> Optional
                   _find(trajectory, "generatorModel"), _find(trajectory, "planModel")]
     model = next((c for c in candidates if isinstance(c, str) and c), None)
     if model:
-        try:
-            tmp = f"{_model_cache_path(conversation)}.tmp.{os.getpid()}"
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump({"model": model, "addr": endpoint.get("addr"), "at": time.time()}, f)
-            os.replace(tmp, _model_cache_path(conversation))
-        except OSError:
-            pass
+        _remember_model(endpoint, conversation, model)
     return model
 
 

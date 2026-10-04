@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.12.1
+
+- **Mentions and messages to an Antigravity session no longer get lost when its conversation is long.** The
+  native push read the conversation's whole history just to learn its model - tens of megabytes and several
+  seconds on a long conversation - and the sender gave up waiting after six, dropping the push without a trace
+  (and, because the lookup never finished, the next push paid the same price). The model is now read from the last
+  few steps in two or three small calls (a fraction of a second) and the whole history is only the fallback. This
+  also makes the model the *latest* generation's rather than the first one found.
+- The sender waits up to twelve seconds for a native Antigravity push, and when it still has to give up it
+  writes a line to `~/.agent-peer/agy-ls/last-fallback.log` instead of staying silent.
+
 ## 0.12.0
 
 - **agent-peer keeps its own session registry.** A listener registers in `~/.agent-peer/sessions/` instead of

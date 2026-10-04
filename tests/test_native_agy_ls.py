@@ -26,7 +26,8 @@ TOKEN = "secret-csrf-token-value"
 class FakeLS:
     """Stdlib stand-in for the Language Server: checks the CSRF header, records requests."""
 
-    def __init__(self, model="MODEL_X", fail_send=False, trajectory_delay=0.0, truncate=0, trajectory_status=200):
+    def __init__(self, model="MODEL_X", fail_send=False, trajectory_delay=0.0, truncate=0, trajectory_status=200,
+                 tail=None, tail_min_window=0):
         self.requests = []
         self.truncate = truncate  # how many trajectory replies to cut short, like a dropped connection
         outer = self
@@ -40,6 +41,16 @@ class FakeLS:
                 outer.requests.append((self.path, {k.lower(): v for k, v in self.headers.items()}, body))
                 if self.headers.get("x-codeium-csrf-token") != TOKEN:
                     return self._reply(401, {"code": "unauthenticated"})
+                if self.path.endswith("/GetAllCascadeTrajectories"):
+                    if tail is None:
+                        return self._reply(404, {})
+                    return self._reply(200, {"trajectorySummaries": {CONV: {"stepCount": 100}}})
+                if self.path.endswith("/GetCascadeTrajectorySteps"):
+                    if tail is None:
+                        return self._reply(404, {})
+                    window = 100 - int(body.get("stepOffset", 0))
+                    models = tail if window >= tail_min_window else []
+                    return self._reply(200, {"steps": [{"metadata": {"generatorModel": m}} for m in models]})
                 if self.path.endswith("/GetCascadeTrajectory"):
                     time.sleep(trajectory_delay)
                     if trajectory_status != 200:
@@ -342,7 +353,8 @@ class FallbackAndCacheTest(AgyLsTestBase):
         calls, patch = self._calls()
         with patch:
             agy_ls.send(self.session, "hi")
-        self.assertEqual(calls, [("GetCascadeTrajectory", 15.0), ("SendUserCascadeMessage", 5.0)])
+        self.assertEqual(calls, [("GetAllCascadeTrajectories", agy_ls._TAIL_TIMEOUT), ("GetCascadeTrajectory", 15.0),
+                                 ("SendUserCascadeMessage", 5.0)])
 
     def test_a_missing_endpoint_is_recorded_without_any_secret(self):
         self.assertIsNone(agy_ls.send(self.session, "hi"))
@@ -442,6 +454,79 @@ class FallbackAndCacheTest(AgyLsTestBase):
         with mock.patch.object(agy_ls, "_MODEL_LOOKUP_TIMEOUT", 1.2):
             self.assertIsNone(agy_ls.send(self.session, "hi"))
         self.assertLess(time.monotonic() - started, 1.9)
+
+    def _calls_to(self, ls, suffix):
+        return sum(1 for r in ls.requests if r[0].endswith(suffix))
+
+    def test_the_model_comes_from_the_latest_steps_without_reading_the_whole_history(self):
+        ls = FakeLS(model="MODEL_FULL", trajectory_delay=5.0, tail=["MODEL_OLD", "MODEL_NEW"])
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        started = time.monotonic()
+        self.assertIsNotNone(agy_ls.send(self.session, "hi"))
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertEqual(ls.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_NEW")
+        self.assertEqual(self._calls_to(ls, "/GetCascadeTrajectory"), 0)
+
+    def test_the_recent_steps_window_is_widened_once_before_the_whole_history_is_read(self):
+        ls = FakeLS(model="MODEL_FULL", tail=["MODEL_NEW"], tail_min_window=50)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        self.assertIsNotNone(agy_ls.send(self.session, "hi"))
+        self.assertEqual(self._calls_to(ls, "/GetCascadeTrajectorySteps"), 2)
+        self.assertEqual(self._calls_to(ls, "/GetCascadeTrajectory"), 0)
+        self.assertEqual(ls.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_NEW")
+
+    def test_without_a_model_in_the_recent_steps_the_whole_history_is_read(self):
+        ls = FakeLS(model="MODEL_FULL", tail=[])
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        self.assertIsNotNone(agy_ls.send(self.session, "hi"))
+        self.assertEqual(self._calls_to(ls, "/GetCascadeTrajectory"), 1)
+        self.assertEqual(ls.sent()[0][2]["cascadeConfig"]["plannerConfig"]["requestedModel"]["model"], "MODEL_FULL")
+
+    def test_the_latest_generator_model_wins_and_is_preferred_over_a_plan_model(self):
+        steps = {"steps": [{"metadata": {"generatorModel": "OLD", "planModel": "PLAN_NEWEST"}},
+                           {"metadata": {"generatorModel": "NEW"}}]}
+        self.assertEqual(agy_ls._find_last(steps, "generatorModel"), "NEW")
+        calls = []
+
+        def fake_rpc(endpoint, method, body, timeout=5.0):
+            calls.append(method)
+            if method == "GetAllCascadeTrajectories":
+                return {"trajectorySummaries": {CONV: {"stepCount": 10}}}
+            return steps
+
+        with mock.patch.object(agy_ls, "_rpc", fake_rpc):
+            self.assertEqual(agy_ls._model_from_recent_steps({"addr": "x"}, CONV), "NEW")
+        self.assertEqual(calls, ["GetAllCascadeTrajectories", "GetCascadeTrajectorySteps"])
+
+    def test_a_recent_steps_lookup_that_cannot_answer_falls_back_to_the_whole_history(self):
+        bad_summaries = {"trajectorySummaries": {}}, {"trajectorySummaries": {CONV: {"stepCount": "many"}}}, {}
+        for summary in bad_summaries:
+            def fake_rpc(endpoint, method, body, timeout=5.0, summary=summary):
+                if method == "GetAllCascadeTrajectories":
+                    return summary
+                raise AssertionError("steps must not be asked without a step count")
+            with mock.patch.object(agy_ls, "_rpc", fake_rpc):
+                self.assertIsNone(agy_ls._model_from_recent_steps({"addr": "x"}, CONV))
+
+        def steps_unsupported(endpoint, method, body, timeout=5.0):
+            if method == "GetAllCascadeTrajectories":
+                return {"trajectorySummaries": {CONV: {"stepCount": 10}}}
+            raise urllib.error.HTTPError("http://x", 404, "no", {}, None)
+
+        with mock.patch.object(agy_ls, "_rpc", steps_unsupported):
+            self.assertIsNone(agy_ls._model_from_recent_steps({"addr": "x"}, CONV))
+
+    def test_the_recent_steps_lookup_gives_up_inside_its_overall_deadline(self):
+        ls = FakeLS(model="MODEL_FULL", tail=["MODEL_NEW"], trajectory_delay=0.0)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        with mock.patch.object(agy_ls, "_TAIL_DEADLINE", 0.0):
+            started = time.monotonic()
+            self.assertIsNone(agy_ls._model_from_recent_steps(agy_ls._read_endpoint(CONV), CONV))
+            self.assertLess(time.monotonic() - started, 1.0)
 
     def test_a_configured_proxy_is_never_used_for_the_loopback_server(self):
         self._register()
