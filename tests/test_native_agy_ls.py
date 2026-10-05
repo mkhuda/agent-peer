@@ -528,6 +528,19 @@ class FallbackAndCacheTest(AgyLsTestBase):
             self.assertIsNone(agy_ls._model_from_recent_steps(agy_ls._read_endpoint(CONV), CONV))
             self.assertLess(time.monotonic() - started, 1.0)
 
+    def test_a_send_in_flight_says_which_step_it_is_in(self):
+        ls = FakeLS(trajectory_delay=1.5)
+        self.addCleanup(ls.close)
+        agy_ls.listen_info(_env(ls.addr))
+        done = []
+        worker = threading.Thread(target=lambda: done.append(agy_ls.send(self.session, "hi")))
+        worker.start()
+        time.sleep(0.6)
+        self.assertEqual(agy_ls.progress.get(worker.ident), "history")
+        worker.join(timeout=20)
+        self.assertNotIn(worker.ident, agy_ls.progress)
+        self.assertTrue(done and done[0])
+
     def test_a_configured_proxy_is_never_used_for_the_loopback_server(self):
         self._register()
         refused = {"http_proxy": "http://127.0.0.1:9", "HTTP_PROXY": "http://127.0.0.1:9", "no_proxy": "", "NO_PROXY": ""}
@@ -657,6 +670,48 @@ class ListenerForwardTest(_ListenHarness):
         self.assertEqual(self._inbox("zz-test-fwd6"), "")
         self.assertEqual(self._status("zz-test-fwd6"), "idle")
 
+    def _post_mention(self, name, text="hello there"):
+        run_cli(["thread", "t1", "--name", name, "--timeout", "1"], self.home)  # leaves a gated presence entry
+        started = time.monotonic()
+        done = run_cli(["send", "--thread", "t1", "--sender", "bob", f"@{name} {text}"], self.home, timeout=40)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        return time.monotonic() - started
+
+    def test_a_thread_mention_is_handed_to_a_current_listener_so_the_poster_never_waits_for_agy(self):
+        self.ls.close()
+        self.ls = FakeLS(trajectory_delay=8.0)  # a slow language server: the whole-history read takes 8 s
+        self._listen("--name", "zz-test-fwd7")
+        self.assertLess(self._post_mention("zz-test-fwd7"), 5.0)
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=20))
+        self.assertIn("hello there", self.ls.sent()[0][2]["items"][0]["text"])
+
+    def test_at_all_and_stop_posts_take_the_listener_handoff_too(self):
+        self._listen("--name", "zz-test-fwd9")
+        run_cli(["thread", "t1", "--name", "zz-test-fwd9", "--timeout", "1"], self.home)
+        for body in ("@all heads up", "[stop] everything"):
+            done = run_cli(["send", "--thread", "t1", "--sender", "bob", body], self.home)
+            self.assertEqual(done.returncode, 0, done.stderr)
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 2, timeout=15))
+        self.assertEqual(self._status("zz-test-fwd9"), "idle")
+
+    def test_a_dead_listener_socket_makes_the_poster_reach_agy_directly(self):
+        self._listen("--name", "zz-test-fwd10")
+        sock = next(s["messagingSocketPath"] for s in self._sessions() if s["name"] == "zz-test-fwd10")
+        os.unlink(sock)
+        open(sock, "w").close()  # still listed as reachable, but nothing listens on it
+        self._post_mention("zz-test-fwd10")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=15))
+
+    def test_a_listener_that_does_not_forward_is_still_reached_directly(self):
+        self._listen("--name", "zz-test-fwd8")
+        for path in glob.glob(os.path.join(self.home, ".agent-peer", "sessions", "*.json")) + \
+                glob.glob(os.path.join(self.home, ".claude", "sessions", "*.json")):
+            meta = _load(path)
+            meta.pop("registryVersion", None)
+            _dump(path, meta)
+        self._post_mention("zz-test-fwd8")
+        self.assertTrue(wait_until(lambda: len(self.ls.sent()) == 1, timeout=10))
+
     def test_a_failed_native_hand_off_keeps_the_message_in_the_inbox(self):
         self._listen("--name", "zz-test-fwd4")
         for path in glob.glob(os.path.join(self.home, ".agent-peer", "agy-ls", "*.json")):
@@ -739,11 +794,11 @@ class AgyThreadPushTest(_ListenHarness):
 
     def test_a_slow_history_read_does_not_make_the_short_lived_poster_drop_the_push(self):
         self.ls.close()
-        self.ls = FakeLS(trajectory_delay=4.0)  # longer than the old 3 s budget, shorter than the new 6 s one
+        self.ls = FakeLS(trajectory_delay=4.0)  # longer than the old 3 s budget
         self._listen("--name", "zz-test-agy-t")
         self._join("zz-test-agy-t")
         self._post("@zz-test-agy-t please look")
-        self.assertEqual(len(self.ls.sent()), 1, "the poster exited before the push finished")
+        self.assertTrue(self._sent(1), "the push never arrived")
 
 
 if __name__ == "__main__":

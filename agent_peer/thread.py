@@ -277,7 +277,7 @@ def fanout_targets(thread_id: str, sender: str, content: str) -> List[Tuple[str,
     return targets
 
 
-def _push_one(name: str, pid: int, frame: str, sender: str, native: bool = True):
+def _push_one(name: str, pid: int, frame: str, sender: str, native: bool = True, handoff: bool = False):
     # Name first: presence pids belong to waiter/join processes, which are
     # never registered sessions - only the participant's listener is, and it
     # registers under this same name by convention. PID is a free fallback.
@@ -287,6 +287,14 @@ def _push_one(name: str, pid: int, frame: str, sender: str, native: bool = True)
             return
         except Exception:
             continue  # a dead/unreachable target must never fail the poster
+    if handoff:
+        # The socket write to the listener failed (stale entry, dead socket): reach agy directly instead.
+        for target in (name, str(pid)):
+            try:
+                send_message(target, frame, from_name=sender, native=True)
+                return
+            except Exception:
+                continue
 
 
 def _agy_native_conversations() -> dict:
@@ -296,6 +304,18 @@ def _agy_native_conversations() -> dict:
                 if str(s.get("agentType") or "").upper() == "AGY" and s.get("agyConversationId") and s.get("name")}
     except Exception:
         return {}
+
+
+def _agy_listener_forwards() -> set:
+    """Names of live agy sessions whose listener (registry version 1+, i.e. agent-peer 0.12+) hands a frame that
+    reaches its socket to agy itself: a push to them is just a socket write, finished at once."""
+    try:
+        return {s.get("name") for s in get_active_sessions()
+                if str(s.get("agentType") or "").upper() == "AGY" and s.get("agyConversationId") and s.get("name")
+                and s.get("alive") and s.get("socketExists")
+                and isinstance(s.get("registryVersion"), int) and s["registryVersion"] >= 1}
+    except Exception:
+        return set()
 
 
 def _agy_native_names() -> set:
@@ -406,6 +426,7 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
         codex_sessions = _codex_sessions()
         agy_conversations = _agy_native_conversations()
         agy_names = set(agy_conversations)
+        forwarding = _agy_listener_forwards()
         registered = _registered_names()
         human = registered is not None and sender not in registered
         workers = []
@@ -431,14 +452,16 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
             )
             # An agy native push is a real user turn: only a mention, @all, [stop] or a human earns one;
             # ordinary posts reaching a follow-all member go by socket (an inbox line, no turn).
-            native = not (name in agy_names and not human and not _mentions(content, name))
-            worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender, native), daemon=True)
+            # A mention reaches a forwarding listener by socket write; its other posts keep the direct rule above.
+            handoff = name in forwarding and _mentions(content, name)
+            native = not (handoff or (name in agy_names and not human and not _mentions(content, name)))
+            worker = threading.Thread(target=_push_one, args=(name, pid, frame, sender, native, handoff), daemon=True)
             worker.start()
             workers.append(worker)
             worker_names[worker] = name
             if name in codex_sessions:
                 codex_workers.add(worker)
-            elif name in agy_names and native:
+            elif name in agy_names and (native or handoff):
                 agy_workers.add(worker)
         started = time.time()
         for worker in workers:
@@ -450,7 +473,8 @@ def fanout_thread_push(thread_id: str, seq: int, sender: str, content: str):
             if worker in agy_workers and worker.is_alive():
                 # The poster exits next and takes this worker with it: leave a trace of the lost push.
                 from .native.agy_ls import note_fallback
-                note_fallback(agy_conversations.get(worker_names[worker], "?"), "budget")
+                from .native.agy_ls import progress
+                note_fallback(agy_conversations.get(worker_names[worker], "?"), f"budget:{progress.get(worker.ident, '?')}")
     except Exception:
         pass
 

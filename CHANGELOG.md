@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.12.2
+
+- **A mention of an Antigravity session is handed to its own listener instead of being delivered by the poster.**
+  The poster used to do the whole native delivery itself and gave up after twelve seconds, losing the push when
+  the language server was slow or busy. Now, when the session's listener is from 0.12 or later, the poster only
+  writes the message to the listener's socket (milliseconds) and the listener delivers it to agy as a user turn in
+  its own, long-lived process. If that socket write fails, the poster delivers directly. Other posts, and sessions
+  whose listener is older, keep the direct delivery.
+- When a poster still has to give up waiting for a native push, the line it writes to
+  `~/.agent-peer/agy-ls/last-fallback.log` now says which step was slow (`budget:tail`, `budget:history` or
+  `budget:send`).
+
 ## 0.12.1
 
 - **Mentions and messages to an Antigravity session no longer get lost when its conversation is long.** The

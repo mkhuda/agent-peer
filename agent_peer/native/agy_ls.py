@@ -9,6 +9,7 @@ import http.client
 import json
 import os
 import re
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -32,6 +33,7 @@ _MODEL_CACHE_SECONDS = 60.0  # a model switched inside this window is picked up 
 _STALE_MODEL_SECONDS = 600.0  # only after a dropped read; a model switched meanwhile is overridden for that turn
 _TRANSIENT = (http.client.HTTPException, ConnectionError)  # a truncated or dropped read; timeouts are not retried
 _FALLBACK_LOG_LINES = 50
+progress: Dict[int, str] = {}  # thread id -> what a send is doing now, read by a poster that gives up waiting
 _ID_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 _LOOPBACK = {"localhost", "127.0.0.1", "::1"}
 
@@ -282,10 +284,12 @@ def _conversation_model(endpoint: Dict[str, Any], conversation: str) -> Optional
     cached = _cached_model(endpoint, conversation)
     if cached:
         return cached
+    progress[threading.get_ident()] = "tail"
     recent = _model_from_recent_steps(endpoint, conversation)
     if recent:
         _remember_model(endpoint, conversation, recent)
         return recent
+    progress[threading.get_ident()] = "history"
     deadline = time.monotonic() + _MODEL_LOOKUP_TIMEOUT
     try:
         try:
@@ -330,6 +334,7 @@ def send(session: Dict[str, Any], wire_content: str) -> Optional[Dict[str, Any]]
             note_fallback(conversation, "model", started=started)
             return None
         stage = "send"
+        progress[threading.get_ident()] = "send"
         _rpc(endpoint, "SendUserCascadeMessage", {
             "cascadeId": conversation,
             "items": [{"text": wire_content}],
@@ -339,5 +344,7 @@ def send(session: Dict[str, Any], wire_content: str) -> Optional[Dict[str, Any]]
     except Exception as exc:
         note_fallback(conversation, stage, exc, started)
         return None
+    finally:
+        progress.pop(threading.get_ident(), None)
     return {"transport": "agy-ls", "target": f"agy-ls:{conversation}",
             "elapsed_ms": round((time.time() - started) * 1000, 2)}
