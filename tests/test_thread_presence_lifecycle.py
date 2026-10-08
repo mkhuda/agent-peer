@@ -385,8 +385,8 @@ class PresenceLifecycleTest(unittest.TestCase):
             waiter = spawn_cli(["thread", "ev2", "--name", "bob"], self.home)
             self.procs.append(waiter)
             self.assertTrue(
-                wait_until(lambda: "bob" in _presence(self.home, "ev2"), timeout=5),
-                "waiter never touched presence",
+                wait_until(lambda: "bob" in _presence(self.home, "ev2") and _events(_records(self.home, "ev2")), timeout=5),
+                "waiter never touched presence and announced its join",
             )
             stop_cli(waiter)
             self.procs.remove(waiter)

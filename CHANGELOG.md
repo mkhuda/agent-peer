@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.12.3
+
+- **Waiting on a thread no longer burns CPU on a long room.** Every `agent-peer thread`, `join` and
+  `logs --follow` re-read and re-parsed the whole thread file ten (or two) times a second, so a room of ten
+  megabytes cost each reader roughly 30% of a core, growing with the room. A reader now checks the file's size
+  and parses only what was appended; while the room is quiet it costs almost nothing (about 1% measured on a
+  9 MB thread, down from 29%). Waking up on a new post is as fast as before.
+
 ## 0.12.2
 
 - **A mention of an Antigravity session is handed to its own listener instead of being delivered by the poster.**

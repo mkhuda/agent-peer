@@ -498,6 +498,45 @@ def read_thread(thread_id: str, limit: Optional[int] = None) -> List[Dict[str, A
     return messages
 
 
+class ThreadTail:
+    """The records appended to a thread since the last `poll()`. The thread file only grows, so a poll
+    is one stat while nothing changed and parses only the new bytes otherwise; the first poll returns the
+    whole history. A half-written last line is left for the next poll."""
+
+    def __init__(self, thread_id: str):
+        self.path = get_thread_path(thread_id)
+        self.offset = 0
+        self._seen_size = -1  # size at the last read: an unfinished last line is not re-read until the file grows
+
+    def poll(self) -> List[Dict[str, Any]]:
+        try:
+            size = os.stat(self.path).st_size
+        except OSError:
+            return []
+        if size < self.offset:
+            self.offset = 0  # replaced by a shorter file: start over
+        if size == self.offset or size == self._seen_size:
+            return []
+        with open(self.path, "rb") as f:
+            f.seek(self.offset)
+            data = f.read(size - self.offset)
+        self._seen_size = size
+        end = data.rfind(b"\n")
+        if end < 0:
+            return []
+        self.offset += end + 1
+        records = []
+        for line in data[:end].splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                records.append(json.loads(line))
+            except Exception:
+                continue
+        return records
+
+
 def _read_thread_cursor(thread_id: str, participant: str) -> int:
     """A new participant's cursor starts at 0 (full backlog), not "now" like
     inbox.py - the foreman typically posts before calling an agent to join."""
@@ -686,17 +725,26 @@ def wait_for_thread_message(
     def ready(unread):
         return bool(unread) and (not mention_only or any(_mentions(m.get("content") or "", participant) for m in unread))
 
-    unread = get_thread_unread(thread_id, participant)
+    tail = ThreadTail(thread_id)
+
+    def fresh(records, cursor):
+        return [m for m in records if m.get("seq", 0) > cursor and m.get("from") != participant]
+
+    unread = fresh(tail.poll(), _read_thread_cursor(thread_id, participant))
     if ready(unread):
         _write_thread_cursor(thread_id, participant, unread[-1]["seq"])
         return unread
 
     t0 = time.time()
     while True:
-        unread = get_thread_unread(thread_id, participant)
-        if ready(unread):
-            _write_thread_cursor(thread_id, participant, unread[-1]["seq"])
-            return unread
+        new = tail.poll()
+        if new:
+            # Re-read the cursor: another process may have advanced it while we waited.
+            cursor = _read_thread_cursor(thread_id, participant)
+            unread = fresh(unread, cursor) + fresh(new, cursor)
+            if ready(unread):
+                _write_thread_cursor(thread_id, participant, unread[-1]["seq"])
+                return unread
         if timeout is not None and (time.time() - t0) >= timeout:
             return None
         time.sleep(0.1)

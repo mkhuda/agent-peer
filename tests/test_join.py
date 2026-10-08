@@ -312,14 +312,14 @@ from unittest import mock
 import agent_peer.join as j
 msg = {{"seq": 7, "from": "ally", "content": "still here"}}
 calls = []
-def fake_read(tid):
+def fake_read(self):
     calls.append(1)
     if len(calls) == 1:
         raise OSError(28, "No space left on device")
     return [msg]
 stop = threading.Event()
 box = [0]
-with mock.patch.object(j, "read_thread", side_effect=fake_read):
+with mock.patch.object(j.ThreadTail, "poll", fake_read):
     th = threading.Thread(
         target=j._poll_loop, args=("tfix3", "me", box, stop, False, None, {{}}, [None]), daemon=True
     )

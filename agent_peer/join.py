@@ -9,7 +9,7 @@ import threading
 from .protocol import get_thread_path
 from .registry import get_active_sessions
 from .sender import send_message
-from .thread import read_thread, append_thread_message, touch_thread_presence, leave_thread_presence, read_thread_presence
+from .thread import ThreadTail, read_thread, append_thread_message, touch_thread_presence, leave_thread_presence, read_thread_presence
 from .logs import format_thread_entry, format_thread_presence_header, supports_color, get_session_cache
 from .picker import pick_multi
 from .rawline import LineEditor, read_message
@@ -148,13 +148,14 @@ def _next_entry(r, use_color, viewer, session_cache, last_sender_box):
 
 
 def _poll_loop(thread_id, participant, last_seq_box, stop_event, use_color, editor, session_cache, last_sender_box, paused=None):
+    tail = ThreadTail(thread_id)
     while not stop_event.is_set():
         try:
             if paused is not None and paused.is_set():
                 # /invite has curses on screen - printing here would corrupt it.
                 stop_event.wait(0.2)
                 continue
-            for r in read_thread(thread_id):
+            for r in tail.poll():
                 seq = r.get("seq", 0)
                 if seq <= last_seq_box[0]:
                     continue

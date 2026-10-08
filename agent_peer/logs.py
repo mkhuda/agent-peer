@@ -8,7 +8,7 @@ from typing import Optional, Dict, List, Tuple
 
 from .protocol import INBOX_FILE, get_session_inbox_path
 from .registry import get_active_sessions
-from .thread import read_thread, read_thread_presence
+from .thread import ThreadTail, read_thread, read_thread_presence
 
 # ANSI Color Codes
 RESET = "\033[0m"
@@ -545,7 +545,8 @@ def show_thread_logs(
             last_sender[0] = r.get("from")
         return text
 
-    all_records = read_thread(thread_id)
+    tail = ThreadTail(thread_id)
+    all_records = tail.poll()
     records = all_records
     if query:
         q_lower = query.lower()
@@ -575,7 +576,7 @@ def show_thread_logs(
     last_seq = all_records[-1]["seq"] if all_records else 0
     try:
         while True:
-            for r in read_thread(thread_id):
+            for r in tail.poll():
                 seq = r.get("seq", 0)
                 if seq <= last_seq:
                     continue
