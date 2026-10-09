@@ -136,6 +136,36 @@ class MentionOnlyTest(unittest.TestCase):
         self.assertEqual(out.returncode, 2)
         self.assertIn("remove --timeout", out.stderr)
 
+    def test_match_wakes_on_a_post_that_does_not_mention_you(self):
+        proc = self._arm("--mention-only", "--match", "pc bebas|landed")
+        self._post("bob", "banter")
+        self._post("bob", "PC BEBAS sekarang")
+        out = self._woke_with(proc, "PC BEBAS sekarang")
+        self.assertNotIn("banter", out)
+        self.assertIn("(+1 not shown.", out)
+
+    def test_match_still_wakes_on_a_mention_and_ignores_banter(self):
+        proc = self._arm("--mention-only", "--match", "landed")
+        self._post("bob", "nothing relevant")
+        self.assertTrue(self._still_waiting(proc))
+        self._post("bob", "@agy-x ping")
+        self._woke_with(proc, "@agy-x ping")
+
+    def test_match_never_matches_a_system_line_or_your_own_post(self):
+        proc = self._arm("--mention-only", "--match", "joined|note")
+        self._post("agy-x", "note to self")
+        self.assertTrue(self._still_waiting(proc))
+
+    def test_match_without_mention_only_is_refused(self):
+        out = run_cli(["thread", "t1", "--name", "agy-x", "--match", "x"], self.home)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("--mention-only", out.stderr)
+
+    def test_an_invalid_regex_is_refused_before_waiting(self):
+        out = run_cli(["thread", "t1", "--name", "agy-x", "--mention-only", "--match", "(unclosed"], self.home, timeout=5)
+        self.assertEqual(out.returncode, 2)
+        self.assertIn("not a valid regular expression", out.stderr)
+
 
 class SplitTest(unittest.TestCase):
     def test_split_counts_real_posts_not_events_and_spans_the_whole_range(self):
@@ -152,6 +182,20 @@ class SplitTest(unittest.TestCase):
         self.assertEqual([m["seq"] for m in shown], [6, 8])
         self.assertEqual(hidden, 2)
         self.assertEqual(span, 5)
+
+    def test_split_with_a_match_adds_real_posts_whose_text_matches(self):
+        import re
+        from agent_peer.thread import split_for_mention_only
+
+        unread = [
+            {"seq": 4, "from": "system", "type": "event", "content": "landed joined the thread"},
+            {"seq": 5, "from": "bob", "content": "banter"},
+            {"seq": 6, "from": "bob", "content": "a5 LANDED ok"},
+            {"seq": 7, "from": "bob", "content": "@me please"},
+        ]
+        shown, hidden, span = split_for_mention_only(unread, "me", re.compile("landed", re.I))
+        self.assertEqual([m["seq"] for m in shown], [6, 7])
+        self.assertEqual((hidden, span), (1, 4))
 
 
 if __name__ == "__main__":

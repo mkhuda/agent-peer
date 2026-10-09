@@ -3,6 +3,7 @@ import os
 import argparse
 import json
 import time
+import re
 
 from . import compat
 
@@ -202,7 +203,7 @@ def cmd_telegram(args):
     if not args.thread:
         print("--thread is required (or set AGENT_PEER_TELEGRAM_THREAD).", file=sys.stderr)
         sys.exit(2)
-    sys.exit(telegram_bridge.run(args.thread, args.name or telegram_bridge.DEFAULT_NAME, args.env_file))
+    sys.exit(telegram_bridge.run(args.thread, args.name or telegram_bridge.DEFAULT_NAME, args.env_file, args.max_age))
 
 def cmd_inbox(args):
     session = args.session or os.environ.get("AGENT_PEER_NAME")
@@ -307,6 +308,16 @@ def cmd_thread(args):
     if args.context and not args.mention_only:
         print("❌ --context only applies together with --mention-only.", file=sys.stderr)
         sys.exit(2)
+    if args.match is not None and not args.mention_only:
+        print("❌ --match only applies together with --mention-only.", file=sys.stderr)
+        sys.exit(2)
+    match = None
+    if args.match is not None:
+        try:
+            match = re.compile(args.match, re.IGNORECASE)
+        except re.error as e:
+            print(f"❌ --match is not a valid regular expression ({e}). Fix the pattern and run it again.", file=sys.stderr)
+            sys.exit(2)
     if args.mention_only and timeout is not None:
         print("❌ --mention-only already waits until you are mentioned; remove --timeout (a timed call is a peek, and each timeout would wake you for nothing).", file=sys.stderr)
         sys.exit(2)
@@ -327,11 +338,11 @@ def cmd_thread(args):
 
     try:
         follow = True if args.follow else None
-        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow, mention_only=args.mention_only)
+        msgs = wait_for_thread_message(args.thread_id, participant, timeout=timeout, follow=follow, mention_only=args.mention_only, match=match)
         if msgs:
             hidden = span = 0
             if args.mention_only and not args.context:
-                msgs, hidden, span = split_for_mention_only(msgs, participant)
+                msgs, hidden, span = split_for_mention_only(msgs, participant, match)
             for msg in msgs:
                 print(f"📬 [{args.thread_id} #{msg.get('seq')} from {msg.get('from', 'unknown')}{_clock(msg.get('ts'))}]: {msg.get('content')}")
             if hidden:
@@ -549,6 +560,7 @@ def main():
     p_telegram.add_argument("--thread", default=os.environ.get("AGENT_PEER_TELEGRAM_THREAD"), metavar="ID", help="Thread to bridge (or $AGENT_PEER_TELEGRAM_THREAD)")
     p_telegram.add_argument("--name", default=None, help="This bridge's identity in the thread (default: telegram-bridge)")
     p_telegram.add_argument("--env-file", default=None, metavar="PATH", help="File with TELEGRAM_BOT_KEY, TELEGRAM_CHAT_ID (default: ~/.agent-peer/telegram.env)")
+    p_telegram.add_argument("--max-age", type=float, default=0, metavar="MINUTES", help="Relay thread messages up to this many minutes old when the bridge starts (default: 0, only new messages; skipped ones are counted in one line)")
     p_telegram.add_argument("--print-chat-id", action="store_true", help="Print chat and user ids with pending messages, then exit (message the bot once first)")
     p_telegram.set_defaults(func=cmd_telegram)
 
@@ -573,6 +585,7 @@ def main():
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("--follow", action="store_true", help="Opt in to follow-all: every other participant's post knocks while you're gated, not just @mentions - costs one push per message, standing until --leave (see skills/codex/SKILL.md for the cost trade-off)")
     p_thread.add_argument("--mention-only", action="store_true", help="Stay in the room but return only when a post mentions you (@name, @all or [stop]); prints just those posts plus a line saying how many others were left out and the `logs -n` command that shows them. Not for agents that must see all traffic.")
+    p_thread.add_argument("--match", metavar="REGEX", default=None, help="With --mention-only: also return posts whose text matches this regular expression (case-insensitive), e.g. --match 'PC bebas|landed|LOLOS'. Mentions still count; system lines never match")
     p_thread.add_argument("--context", action="store_true", help="With --mention-only: print every unread post, not just the mentions")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")

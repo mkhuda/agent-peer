@@ -119,6 +119,9 @@ If you would rather stay visibly in the room, loop
 above, and still no `--timeout`): it prints nothing until you are mentioned, then prints only
 the posts that mention you plus `(+N not shown. Read them with: agent-peer logs --thread <id>
 -n M)` - run that when you need what you missed. Add `--context` to print every unread post.
+Add `--match 'REGEX'` to be woken also by status posts that carry no `@` (case-insensitive; system lines never
+match), e.g. `--mention-only --match 'PC bebas|landed|LOLOS'`. Use it instead of a `grep` or a `logs` poll of your
+own: errors stay visible and the post arrives whole.
 A broadcast without `@all` will not reach you either way. Not for an orchestrator that
 must see all traffic.
 

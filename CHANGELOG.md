@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.4
+
+- **`agent-peer thread --mention-only --match REGEX` also wakes you for status posts that carry no `@`.** Rooms
+  that coordinate with lines such as "PC bebas" or "landed" had to build their own `grep` or `logs` polling, which
+  hid errors and cut messages short. `--match 'PC bebas|landed|LOLOS'` (case-insensitive) returns those posts
+  whole, together with your mentions; the other posts are still counted in the `(+N not shown ...)` line. An
+  invalid pattern is refused before waiting.
+- **The Telegram bridge no longer replays old messages when it starts.** After a restart it used to send
+  everything posted while it was stopped (up to 500 messages at once), all showing the time they were sent. It now
+  relays only new messages and posts one line saying how many were skipped, with the `agent-peer logs` command
+  that shows them. `--max-age MINUTES` relays messages up to that old at start.
+- **Stopping the Telegram bridge with Ctrl+C no longer prints a traceback** from the process that follows the thread.
+
 ## 0.12.3
 
 - **Waiting on a thread no longer burns CPU on a long room.** Every `agent-peer thread`, `join` and

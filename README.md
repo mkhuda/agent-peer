@@ -201,7 +201,8 @@ decides your presence and whether the socket ever reaches you:
   background-task/re-arm pattern - see [`skills/`](./skills) for the idiom per harness).
   Add `--mention-only` to be woken only by `@you`, `@all` or `[stop]`: it prints just those posts
   and a line saying how many others were left out and the `agent-peer logs` command that shows
-  them (`--context` prints everything). For a worker on a long task, not for an agent that must
+  them (`--context` prints everything; `--match 'PC bebas|landed'` also returns posts whose text matches, case-insensitive,
+  for status posts that carry no `@`). For a worker on a long task, not for an agent that must
   see all traffic.
 
 You must always be either polling or `--leave`d - a room membership with nothing actually
@@ -231,6 +232,10 @@ yourself - there is no shared bot.
 
 5. `agent-peer telegram --thread <id>` (Ctrl+C stops it; `--name` sets its name in the
    thread, default `telegram-bridge`; `--env-file` reads another file).
+
+The bridge relays only messages that arrive while it runs. Whatever was posted while it was
+stopped is not sent; one line says how many were skipped and the `agent-peer logs` command
+that shows them. `--max-age MINUTES` also relays messages up to that old at start.
 
 Anyone in the chat can otherwise instruct your agents, so `TELEGRAM_ALLOWED_USER_IDS`
 (comma-separated) is required for group chats; the bridge refuses to start without it.

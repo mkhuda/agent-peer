@@ -695,10 +695,16 @@ def get_thread_unread(thread_id: str, participant: str) -> List[Dict[str, Any]]:
     ]
 
 
-def split_for_mention_only(unread: List[Dict[str, Any]], participant: str) -> Tuple[List[Dict[str, Any]], int, int]:
-    """(posts that mention the participant, how many other real posts are left out,
+def _wanted(m: Dict[str, Any], participant: str, match: Optional["re.Pattern"] = None) -> bool:
+    """A post `--mention-only` returns: it mentions the participant, or a real post's text matches `--match`."""
+    content = m.get("content") or ""
+    return _mentions(content, participant) or bool(match and m.get("from") != "system" and match.search(content))
+
+
+def split_for_mention_only(unread: List[Dict[str, Any]], participant: str, match: Optional["re.Pattern"] = None) -> Tuple[List[Dict[str, Any]], int, int]:
+    """(posts that mention the participant or match, how many other real posts are left out,
     how many records the thread's unread range spans - the `logs -n` value that shows it all)."""
-    shown = [m for m in unread if _mentions(m.get("content") or "", participant)]
+    shown = [m for m in unread if _wanted(m, participant, match)]
     hidden = sum(1 for m in unread if m not in shown and m.get("from") != "system")
     span = unread[-1]["seq"] - unread[0]["seq"] + 1 if unread else 0
     return shown, hidden, span
@@ -710,6 +716,7 @@ def wait_for_thread_message(
     timeout: Optional[float] = None,
     follow: Optional[bool] = None,
     mention_only: bool = False,
+    match: Optional["re.Pattern"] = None,
 ) -> Optional[List[Dict[str, Any]]]:
     """Immediate-backlog-then-poll, like inbox.py's wait_for_message but
     shared. Cursor advances to unread[-1]'s seq (not a fresh re-read, which
@@ -719,11 +726,11 @@ def wait_for_thread_message(
     into "follow-all" - every other participant's post knocks, not just
     @mentions - see touch_thread_presence for its carry-forward semantics.
     `mention_only` stays silent (cursor untouched) until a post mentions the
-    participant, then returns every unread post as context."""
+    participant (or matches `match`), then returns every unread post as context."""
     touch_thread_presence(thread_id, participant, left=(timeout is not None), follow=follow)
 
     def ready(unread):
-        return bool(unread) and (not mention_only or any(_mentions(m.get("content") or "", participant) for m in unread))
+        return bool(unread) and (not mention_only or any(_wanted(m, participant, match) for m in unread))
 
     tail = ThreadTail(thread_id)
 

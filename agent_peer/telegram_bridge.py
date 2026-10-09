@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from .protocol import atomic_write_json
+from .thread import read_thread
 
 DEFAULT_NAME = "telegram-bridge"
 MAX_TELEGRAM_CHARS = 3900  # Telegram's real cap is 4096 - leave room for a sender prefix
@@ -240,17 +241,38 @@ def _drain_stderr(pipe, label: str) -> None:
 
 
 _REPLAY_ON_RESTART = 500
+DEFAULT_MAX_AGE_MINUTES = 0.0
 
 
-def thread_to_telegram(agent_cmd: list, thread_id: str, participant: str, token: str, chat_id: str, state: _State) -> None:
+def _skip_stale_backlog(thread_id: str, participant: str, token: str, chat_id: str, state: _State, cutoff: float) -> None:
+    """On restart, records older than `cutoff` are not relayed; one line says how many were left out."""
+    last_seq = state.get("last_seq")
+    if last_seq is None:
+        return
+    records = [r for r in read_thread(thread_id) if isinstance(r.get("seq"), int)]
+    stale = [r for r in records if r["seq"] > last_seq and r.get("ts", 0) < cutoff]
+    if not stale:
+        return
+    state.set("last_seq", max(r["seq"] for r in stale))
+    skipped = sum(1 for r in stale if r.get("from") != participant and (r.get("content") or r.get("type") == "event"))
+    if skipped:
+        span = records[-1]["seq"] - stale[0]["seq"] + 1
+        _send_to_telegram(token, chat_id, f"⏸ Bridge is back. {skipped} older messages were skipped.\n"
+                                          f"Read them: <code>agent-peer logs --thread {html.escape(thread_id, quote=False)} -n {span}</code>")
+
+
+def thread_to_telegram(agent_cmd: list, thread_id: str, participant: str, token: str, chat_id: str, state: _State,
+                       max_age: float = DEFAULT_MAX_AGE_MINUTES * 60) -> None:
     """Relays new thread records from one persistent `logs --follow --raw` child."""
     started = time.time()
+    _skip_stale_backlog(thread_id, participant, token, chat_id, state, started - max_age)
     while not _stop.is_set():
         last_seq = state.get("last_seq")
         cmd = [*agent_cmd, "logs", "--thread", thread_id, "--follow", "--raw", "-n", str(_REPLAY_ON_RESTART if last_seq is not None else 1)]
         try:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                                    encoding="utf-8", errors="replace", env=_child_env())
+                                    encoding="utf-8", errors="replace", env=_child_env(),
+                                    start_new_session=os.name == "posix")  # Ctrl+C reaches only the bridge, which stops the child itself
         except OSError as exc:
             print(f"[telegram-bridge] failed to start logs --follow: {exc}", file=sys.stderr)
             time.sleep(5)
@@ -419,7 +441,7 @@ def print_chat_ids(env_file: Optional[str] = None) -> int:
     return 0
 
 
-def run(thread_id: str, participant: str, env_file: Optional[str] = None) -> int:
+def run(thread_id: str, participant: str, env_file: Optional[str] = None, max_age_minutes: float = DEFAULT_MAX_AGE_MINUTES) -> int:
     """Blocks until Ctrl+C/SIGTERM. Returns a process exit code."""
     _stop.clear()
     _fatal.clear()
@@ -449,6 +471,7 @@ def run(thread_id: str, participant: str, env_file: Optional[str] = None) -> int
 
     prev_sigint = signal.signal(signal.SIGINT, _handle_signal)
     prev_sigterm = signal.signal(signal.SIGTERM, _handle_signal)
+    prev_sighup = signal.signal(signal.SIGHUP, _handle_signal) if hasattr(signal, "SIGHUP") else None
 
     failed = threading.Event()
 
@@ -461,7 +484,7 @@ def run(thread_id: str, participant: str, env_file: Optional[str] = None) -> int
             print(f"[telegram-bridge] {getattr(fn, '__name__', 'worker')} stopped: {exc!r}", file=sys.stderr)
 
     workers = [
-        threading.Thread(target=guarded, args=(thread_to_telegram, agent_cmd, thread_id, participant, token, chat_id, state), daemon=True),
+        threading.Thread(target=guarded, args=(thread_to_telegram, agent_cmd, thread_id, participant, token, chat_id, state, max(max_age_minutes, 0) * 60), daemon=True),
         threading.Thread(target=guarded, args=(telegram_to_thread, agent_cmd, thread_id, participant, token, chat_id, allowed, state), daemon=True),
     ]
     for w in workers:
@@ -487,6 +510,8 @@ def run(thread_id: str, participant: str, env_file: Optional[str] = None) -> int
             w.join(timeout=2)
         signal.signal(signal.SIGINT, prev_sigint)
         signal.signal(signal.SIGTERM, prev_sigterm)
+        if prev_sighup is not None:
+            signal.signal(signal.SIGHUP, prev_sighup)
 
     print("[telegram-bridge] stopped.")
     return 1 if failed.is_set() or _fatal.is_set() else 0

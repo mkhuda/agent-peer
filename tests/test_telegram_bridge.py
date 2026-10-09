@@ -224,12 +224,60 @@ class RestartTest(unittest.TestCase):
         self.assertEqual(state.get("last_seq"), 8)
         self.assertEqual(cmd[-2:], ["-n", str(tb._REPLAY_ON_RESTART)])
 
+    def test_the_follow_child_runs_in_its_own_session_so_ctrl_c_reaches_only_the_bridge(self):
+        with mock.patch.object(tb.subprocess, "Popen") as pop:
+            pop.return_value.stdout = iter(())
+            pop.return_value.stderr = iter(())
+            tb._stop.clear()
+            with mock.patch.object(tb.time, "sleep", side_effect=lambda s: tb._stop.set()):
+                tb.thread_to_telegram(["ap"], "room", "bridge", "t", "1", FakeState(last_seq=1))
+        self.assertEqual(pop.call_args.kwargs.get("start_new_session"), os.name == "posix")
+
     def test_own_relayed_messages_are_not_echoed_but_still_advance_the_cursor(self):
         state = FakeState(last_seq=1)
         mine = json.dumps({"seq": 2, "ts": 1.0, "from": "telegram-bridge", "content": "from phone"})
         sent, _ = self._follow([mine], state)
         self.assertEqual(sent, [])
         self.assertEqual(state.get("last_seq"), 2)
+
+
+class StaleBacklogTest(unittest.TestCase):
+    def _run(self, records, state, cutoff=1000.0, participant="bridge"):
+        sent = []
+        with mock.patch.object(tb, "read_thread", return_value=records), \
+                mock.patch.object(tb, "_send_to_telegram", side_effect=lambda t, c, text: sent.append(text)):
+            tb._skip_stale_backlog("room", participant, "t", "1", state, cutoff)
+        return sent
+
+    def _rec(self, seq, ts, sender="a", content="x", **extra):
+        return {"seq": seq, "ts": ts, "from": sender, "content": content, **extra}
+
+    def test_old_records_are_skipped_with_one_summary_that_points_at_logs(self):
+        state = FakeState(last_seq=10)
+        records = [self._rec(s, 100.0) for s in (9, 10, 11, 12, 13)] + [self._rec(14, 1500.0)]
+        sent = self._run(records, state)
+        self.assertEqual(state.get("last_seq"), 13)
+        self.assertEqual(len(sent), 1)
+        self.assertIn("3 older messages were skipped", sent[0])
+        self.assertIn("agent-peer logs --thread room -n 4", sent[0])
+
+    def test_records_inside_the_window_are_left_for_the_normal_relay(self):
+        state = FakeState(last_seq=10)
+        sent = self._run([self._rec(11, 1200.0), self._rec(12, 1300.0)], state)
+        self.assertEqual((sent, state.get("last_seq")), ([], 10))
+
+    def test_nothing_is_said_when_every_old_record_was_the_bridges_own(self):
+        state = FakeState(last_seq=10)
+        sent = self._run([self._rec(11, 100.0, sender="bridge")], state)
+        self.assertEqual((sent, state.get("last_seq")), ([], 11))
+
+    def test_a_restart_relays_no_backlog_by_default(self):
+        self.assertEqual(tb.DEFAULT_MAX_AGE_MINUTES, 0)
+
+    def test_the_first_run_has_no_backlog_to_skip(self):
+        state = FakeState()
+        self.assertEqual(self._run([self._rec(1, 100.0)], state), [])
+        self.assertIsNone(state.get("last_seq"))
 
 
 class OffsetTest(unittest.TestCase):
