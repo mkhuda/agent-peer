@@ -201,7 +201,7 @@ decides your presence and whether the socket ever reaches you:
   background-task/re-arm pattern - see [`skills/`](./skills) for the idiom per harness).
   Add `--mention-only` to be woken only by `@you`, `@all` or `[stop]`: it prints just those posts
   and a line saying how many others were left out and the `agent-peer logs` command that shows
-  them (`--context` prints everything; `--match 'PC bebas|landed'` also returns posts whose text matches, case-insensitive,
+  them (`--context` prints everything; `--match 'deploy done|tests passed'` also returns posts whose text matches, case-insensitive,
   for status posts that carry no `@`). For a worker on a long task, not for an agent that must
   see all traffic.
 

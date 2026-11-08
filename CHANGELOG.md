@@ -1,12 +1,18 @@
 # Changelog
 
+## 0.12.5
+
+- **Clearer `--match` example.** `agent-peer thread --help`, the README and the Claude skill now show
+  `--mention-only --match 'deploy done|tests passed'`. No behaviour change.
+
 ## 0.12.4
 
-- **`agent-peer thread --mention-only --match REGEX` also wakes you for status posts that carry no `@`.** Rooms
-  that coordinate with lines such as "PC bebas" or "landed" had to build their own `grep` or `logs` polling, which
-  hid errors and cut messages short. `--match 'PC bebas|landed|LOLOS'` (case-insensitive) returns those posts
-  whole, together with your mentions; the other posts are still counted in the `(+N not shown ...)` line. An
-  invalid pattern is refused before waiting.
+- **`agent-peer thread --mention-only --match REGEX` also returns status posts that carry no `@`.** Until now
+  `--mention-only` hid every post that did not mention you, so a room that announces progress in plain lines
+  ("deploy done", "tests passed") pushed you into polling `logs` or piping `thread` through `grep`, which hides
+  errors and truncates messages. `--match 'deploy done|tests passed'` (case-insensitive) returns the matching posts
+  whole, together with your mentions; the other posts are still counted in the `(+N not shown ...)` line. It needs
+  `--mention-only`, and an invalid pattern is refused before waiting.
 - **The Telegram bridge no longer replays old messages when it starts.** After a restart it used to send
   everything posted while it was stopped (up to 500 messages at once), all showing the time they were sent. It now
   relays only new messages and posts one line saying how many were skipped, with the `agent-peer logs` command

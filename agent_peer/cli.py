@@ -585,7 +585,7 @@ def main():
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
     p_thread.add_argument("--follow", action="store_true", help="Opt in to follow-all: every other participant's post knocks while you're gated, not just @mentions - costs one push per message, standing until --leave (see skills/codex/SKILL.md for the cost trade-off)")
     p_thread.add_argument("--mention-only", action="store_true", help="Stay in the room but return only when a post mentions you (@name, @all or [stop]); prints just those posts plus a line saying how many others were left out and the `logs -n` command that shows them. Not for agents that must see all traffic.")
-    p_thread.add_argument("--match", metavar="REGEX", default=None, help="With --mention-only: also return posts whose text matches this regular expression (case-insensitive), e.g. --match 'PC bebas|landed|LOLOS'. Mentions still count; system lines never match")
+    p_thread.add_argument("--match", metavar="REGEX", default=None, help="With --mention-only: also return posts whose text matches this regular expression (case-insensitive), e.g. --match 'deploy done|tests passed'. Mentions still count; system lines never match")
     p_thread.add_argument("--context", action="store_true", help="With --mention-only: print every unread post, not just the mentions")
     p_thread.add_argument("-i", "--interactive", action="store_true", help="Human live view instead of a one-shot wait - alias for 'agent-peer join'")
     p_thread.add_argument("-I", "--invite", action="store_true", help="With --interactive: always show the invite picker, even rejoining an existing thread")

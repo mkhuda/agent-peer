@@ -137,10 +137,10 @@ class MentionOnlyTest(unittest.TestCase):
         self.assertIn("remove --timeout", out.stderr)
 
     def test_match_wakes_on_a_post_that_does_not_mention_you(self):
-        proc = self._arm("--mention-only", "--match", "pc bebas|landed")
+        proc = self._arm("--mention-only", "--match", "deploy done|landed")
         self._post("bob", "banter")
-        self._post("bob", "PC BEBAS sekarang")
-        out = self._woke_with(proc, "PC BEBAS sekarang")
+        self._post("bob", "DEPLOY DONE on staging")
+        out = self._woke_with(proc, "DEPLOY DONE on staging")
         self.assertNotIn("banter", out)
         self.assertIn("(+1 not shown.", out)
 
