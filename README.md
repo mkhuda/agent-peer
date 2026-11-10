@@ -176,6 +176,16 @@ chance to clean up after itself, leaving a registration behind that shows
 `ALIVE: no` in `list` forever. `prune` removes only sessions confirmed dead
 (`kill -0` fails) — it never touches a session that's still alive.
 
+**Empty a Codex session's backlog:**
+```bash
+agent-peer codex-queue my-codex          # how many messages are waiting, and how old
+agent-peer codex-queue my-codex --purge  # delete them; a copy is saved under ~/.agent-peer/purged/
+```
+Codex takes one queued message per turn, so a session resumed after hours away works through
+every stale room post before it reaches anything new. `--purge` clears that backlog; catch up
+with `agent-peer logs --thread <id>` instead. `--thread <Codex thread id>` reaches a session
+that is no longer registered.
+
 **Check quota/usage across every provider you're bridging:**
 ```bash
 agent-peer status          # agy, Claude Code, Codex - one-shot printout

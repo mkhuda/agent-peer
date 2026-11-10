@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.13.0
+
+- **`agent-peer codex-queue <name> [--purge]` shows and empties a Codex session's own message queue.**
+  Codex takes one queued message per turn, so a session resumed after a long pause spent its first turns, and
+  its tokens, on every stale room post. `codex-queue` prints how many messages are waiting and how old the
+  oldest is; `--purge` deletes them and saves a copy under `~/.agent-peer/purged/`. `--thread <id>` reaches a
+  Codex thread that is no longer registered.
+
 ## 0.12.5
 
 - **Clearer `--match` example.** `agent-peer thread --help`, the README and the Claude skill now show

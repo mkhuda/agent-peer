@@ -13,7 +13,7 @@ from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .native import get_native
 from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only
-from .codex_queue import thread_cwd
+from .codex_queue import thread_cwd, queue_state, purge_queue, save_purged
 from .join import run_join
 from .logs import show_logs, show_thread_logs
 from .agy_status import format_agy_status, get_agy_status_dict
@@ -119,6 +119,43 @@ def cmd_prune(args):
         print(f"🧹 Pruned '{name}' (PID {pid}, dead) - removed {len(removed)} file(s)")
 
     print(f"\nPruned {len(dead)} dead session(s).")
+
+def cmd_codex_queue(args):
+    """Show or empty the messages waiting in a Codex session's own queue."""
+    if bool(args.target) == bool(args.thread):
+        print("Give a Codex session name or PID, or --thread <Codex thread id>.", file=sys.stderr)
+        sys.exit(2)
+    if args.thread:
+        thread_id, label = args.thread, args.thread
+    else:
+        match = [s for s in get_active_sessions()
+                 if str(s.get("pid")) == args.target or (s.get("name") or "").lower() == args.target.lower()]
+        codex = sorted((s for s in match if s.get("codexThreadId")), key=lambda s: not s.get("alive"))
+        if not codex:
+            what = "is not a Codex session with a thread" if match else "is not registered"
+            print(f"'{args.target}' {what}. Check `agent-peer list`, or pass --thread <Codex thread id>.", file=sys.stderr)
+            sys.exit(1)
+        thread_id, label = codex[0]["codexThreadId"], codex[0].get("name") or args.target
+    if not args.purge:
+        state = queue_state(thread_id)
+        if state is None:
+            print("Cannot read the Codex queue database under ~/.codex.", file=sys.stderr)
+            sys.exit(1)
+        n, oldest = state
+        age = f", oldest {_short_age(int(time.time() - oldest))} old" if n and oldest else ""
+        print(f"{label}: {n} message(s) waiting{age}." + (f" Empty it with: agent-peer codex-queue {args.target or '--thread ' + thread_id} --purge" if n else ""))
+        return
+    try:
+        items = purge_queue(thread_id)
+    except Exception as e:
+        print(f"Could not empty the Codex queue ({type(e).__name__}: {e}). Nothing was deleted; try again in a moment.", file=sys.stderr)
+        sys.exit(1)
+    if not items:
+        print(f"{label}: queue already empty.")
+        return
+    path = save_purged(label, items)
+    print(f"{label}: removed {len(items)} waiting message(s). Copy saved to {path}")
+
 
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
@@ -536,6 +573,12 @@ def main():
     p_prune = subparsers.add_parser("prune", help="Remove registrations for sessions whose process is confirmed dead (ALIVE: no)")
     p_prune.add_argument("--force", action="store_true", help="Proceed even if every registered session shows ALIVE: no at once (normally refused - likely a sandboxed liveness check, not real)")
     p_prune.set_defaults(func=cmd_prune)
+
+    p_cq = subparsers.add_parser("codex-queue", help="Show or empty the messages waiting in a Codex session's own queue")
+    p_cq.add_argument("target", nargs="?", help="Codex session name or PID (see `agent-peer list`)")
+    p_cq.add_argument("--thread", help="Codex thread id, for a session that is no longer registered")
+    p_cq.add_argument("--purge", action="store_true", help="Delete every waiting message; a copy is saved under ~/.agent-peer/purged/")
+    p_cq.set_defaults(func=cmd_codex_queue)
 
     # send
     p_send = subparsers.add_parser("send", help="Send a real-time message to a session")
