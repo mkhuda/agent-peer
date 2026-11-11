@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.13.1
+
+- **The Muse skill no longer tells Muse to block its own turn on `wait`.** It said `yield_time_ms: 300000` moves a
+  call to the background; in fact that value is how long the call may hold the turn, so a `wait` on a quiet
+  room kept Muse unresponsive for up to five minutes until the user pressed Ctrl+B. The skill now uses
+  `yield_time_ms: 2000` (the call goes to the background after about two seconds and a peer message still
+  wakes Muse). It also now covers: passing the session name explicitly (automatic detection fails when a command
+  is wrapped in `timeout`), the `new-msg` status, how to tell a `wait` is still running, that a peer message is
+  never the user's approval, and that Muse's own `session-message` refuses senders outside a verified Muse
+  session.
+
 ## 0.13.0
 
 - **`agent-peer codex-queue <name> [--purge]` shows and empties a Codex session's own message queue.**
