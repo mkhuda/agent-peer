@@ -199,7 +199,16 @@ agent-peer thread dev-sync                          # backlog + block for the ne
 agent-peer send --thread dev-sync "found the bug"   # post - every participant sees it, not just one
 agent-peer thread dev-sync --leave                  # step out: gated from banter, still reachable by @mention
 agent-peer join dev-sync                            # human-only: live two-way view with an invite picker
+agent-peer thread list                              # every thread on this machine: last activity, who is in it
+agent-peer thread rm dev-sync                       # delete one thread (a copy is kept)
 ```
+`thread list` (`--json` for scripts) shows each thread's newest activity, who is still polling
+(`name?` = marked active but its process is gone) and how many members have left; it never waits on
+or creates a thread, so `list` is a reserved name. Read one with `agent-peer logs --thread <id>`.
+`thread rm <name>` deletes a thread's transcript, presence and every member's read position, after saving
+a copy of the transcript under `~/.agent-peer/purged/`. It refuses while a member is still polling the
+thread (`--force` overrides) and never touches another thread. `rm` is reserved as a name too.
+
 Every `thread` call is one-shot (block for the next message, print, exit) - what you pass
 decides your presence and whether the socket ever reaches you:
 - **`--timeout N` (peek):** a quick backlog check. Gated - safe mid-task, never arms

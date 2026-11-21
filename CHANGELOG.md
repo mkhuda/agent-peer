@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.14.0
+
+- **`agent-peer thread list` shows every thread on the machine.** One line per thread: how many posts it has, when
+  and by whom it was last active, who is still polling it and how many members have left; `--json` prints the
+  same for scripts. It reads only the end of each thread file, so it stays fast with large histories. Until now
+  `thread list` was read as a thread named "list" and joined it, so `list` is now reserved as a name (a thread
+  already named `list` stays readable with `agent-peer logs --thread list`).
+- **`agent-peer thread rm <name>` deletes a thread.** It removes the transcript, the presence record and every
+  member's read position, and keeps a copy of the transcript under `~/.agent-peer/purged/`. It refuses while a
+  member is still polling the thread (`--force` overrides) and leaves every other thread alone, including one whose
+  name only starts with this one's (`a` and `a.b`). `rm` is a reserved thread name, like `list`.
+
 ## 0.13.1
 
 - **The Muse skill no longer tells Muse to block its own turn on `wait`.** It said `yield_time_ms: 300000` moves a

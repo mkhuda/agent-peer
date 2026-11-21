@@ -1,5 +1,6 @@
 import os
 import json
+import shutil
 import re
 import threading
 import time
@@ -13,6 +14,10 @@ from .protocol import (
     get_thread_push_state_path,
     atomic_write_json,
     ensure_dirs,
+    THREADS_DIR,
+    CURSORS_DIR,
+    LOCKS_DIR,
+    AGENT_PEER_DIR,
 )
 from .sender import send_message
 from .registry import get_active_sessions
@@ -672,6 +677,97 @@ def leave_thread_presence(thread_id: str, participant: str) -> bool:
     if emit_leave:
         _append_system_event(thread_id, "leave", participant)
     return True
+
+
+def list_threads() -> List[Dict[str, Any]]:
+    """Every thread on this machine, newest activity first. Reads only each file's tail, never the whole history."""
+    ensure_dirs()
+    out = []
+    for fname in os.listdir(THREADS_DIR):
+        if not fname.endswith(".jsonl"):
+            continue
+        thread_id = fname[: -len(".jsonl")]
+        try:
+            size = os.path.getsize(os.path.join(THREADS_DIR, fname))
+            last = _read_last_record(os.path.join(THREADS_DIR, fname)) or {}
+        except OSError:
+            continue
+        active, stale, left = [], [], []
+        for name, info in read_thread_presence(thread_id).items():
+            if not isinstance(info, dict):
+                continue
+            if info.get("left"):
+                left.append(name)
+            elif isinstance(info.get("pid"), int) and compat.is_pid_alive(info["pid"]):
+                active.append(name)
+            else:
+                stale.append(name)
+        ts = last.get("ts")
+        out.append({
+            "thread": thread_id, "seq": last.get("seq", 0), "bytes": size,
+            "lastTs": ts if isinstance(ts, (int, float)) else None, "lastFrom": last.get("from"),
+            "active": sorted(active), "stale": sorted(stale), "left": sorted(left),
+        })
+    out.sort(key=lambda t: t["lastTs"] or 0, reverse=True)
+    return out
+
+
+def remove_thread(thread_id: str, force: bool = False) -> Dict[str, Any]:
+    """Delete one thread: its transcript, presence, locks and every participant's cursors. A copy of the
+    transcript is kept under ~/.agent-peer/purged/. Raises ValueError (message is user-facing) when the name is
+    unsafe, the thread does not exist, or a member is still polling it and `force` is off."""
+    ensure_dirs()
+    if not thread_id or os.path.basename(thread_id) != thread_id or thread_id.startswith("."):
+        raise ValueError(f"'{thread_id}' is not a valid thread name.")
+    path = get_thread_path(thread_id)
+    if not os.path.exists(path):
+        raise ValueError(f"No thread named '{thread_id}'. See every thread with: agent-peer thread list")
+    live = sorted(
+        name for name, info in read_thread_presence(thread_id).items()
+        if isinstance(info, dict) and not info.get("left") and isinstance(info.get("pid"), int)
+        and info["pid"] != os.getpid() and compat.is_pid_alive(info["pid"])
+    )
+    if live and not force:
+        raise ValueError(
+            f"{', '.join(live)} {'is' if len(live) == 1 else 'are'} still polling '{thread_id}'. "
+            f"Ask them to run `agent-peer thread {thread_id} --leave` and stop, or add --force."
+        )
+    lock = _acquire_thread_lock(get_thread_lock_path(thread_id), timeout=5.0)
+    if lock is None:
+        raise ValueError(f"Thread '{thread_id}' is being written right now. Try again in a moment.")
+    try:
+        purged = os.path.join(AGENT_PEER_DIR, "purged")
+        os.makedirs(purged, mode=0o700, exist_ok=True)
+        backup = os.path.join(purged, f"thread-{thread_id}-{time.strftime('%Y%m%d-%H%M%S')}.jsonl")
+        shutil.copyfile(path, backup)
+        _secure(backup)
+        records = (_read_last_record(path) or {}).get("seq", 0)
+        others = [t["thread"] for t in list_threads() if t["thread"] != thread_id]
+        doomed = [path, get_thread_presence_path(thread_id), get_thread_lock_path(thread_id) + ".presence"]
+        for prefix, directory, suffix in (("thread.", CURSORS_DIR, ".json"), ("push.", CURSORS_DIR, ".json"), ("thread.", LOCKS_DIR, ".lock")):
+            head = f"{prefix}{thread_id}."
+            for fname in os.listdir(directory):
+                if not (fname.startswith(head) and fname.endswith(suffix)):
+                    continue
+                rest = fname[len(head):-len(suffix)]
+                # "a.b" is another thread when it exists, so its cursors are not ours.
+                if any(o.startswith(thread_id + ".") and rest.startswith(o[len(thread_id) + 1:] + ".") for o in others):
+                    continue
+                doomed.append(os.path.join(directory, fname))
+        removed = 0
+        for f in doomed:
+            try:
+                os.unlink(f)
+                removed += 1
+            except FileNotFoundError:
+                pass
+    finally:
+        compat.release_lock(lock)
+    try:
+        os.unlink(get_thread_lock_path(thread_id))
+    except OSError:
+        pass
+    return {"thread": thread_id, "records": records, "files": removed, "backup": backup, "forced": bool(live)}
 
 
 def read_thread_presence(thread_id: str) -> Dict[str, Any]:

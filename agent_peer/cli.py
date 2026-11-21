@@ -12,7 +12,7 @@ from .sender import send_message
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .native import get_native
-from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only
+from .thread import append_thread_message, wait_for_thread_message, leave_thread_presence, split_for_mention_only, list_threads, remove_thread
 from .codex_queue import thread_cwd, queue_state, purge_queue, save_purged
 from .join import run_join
 from .logs import show_logs, show_thread_logs
@@ -333,9 +333,59 @@ def cmd_join(args):
         sys.exit(1)
     run_join(args.thread_id, participant, invite=args.invite, all_scope=args.all)
 
+def _ago(seconds: int) -> str:
+    return f"{seconds // 86400}d" if seconds >= 172800 else _short_age(seconds)
+
+
+def _names(names, limit=2) -> str:
+    return "-" if not names else ", ".join(names[:limit]) + (f" +{len(names) - limit}" if len(names) > limit else "")
+
+
+def cmd_thread_list(args):
+    """Every thread on this machine with its latest activity and who is in it."""
+    threads = list_threads()
+    if args.json:
+        print(json.dumps(threads, indent=2))
+        return
+    if not threads:
+        print("No threads yet. Start one with: agent-peer send --thread <name> \"message\"")
+        return
+    print(f"{'THREAD':<26} {'LAST #':>7}  {'LAST ACTIVITY':<22} {'ACTIVE':<40} {'LEFT'}")
+    print("-" * 110)
+    for t in threads:
+        last = "-"
+        if t["lastTs"]:
+            last = f"{_ago(max(0, int(time.time() - t['lastTs'])))} ago {t['lastFrom'] or ''}".strip()
+        active = _names(t["active"] + [f"{n}?" for n in t["stale"]])
+        print(f"{t['thread'][:26]:<26} {t['seq']:>7}  {last[:22]:<22} {active:<40} {len(t['left']) or '-'}")
+    print(f"\nTotal: {len(threads)} threads. ACTIVE = still polling; 'name?' = marked active but its process is gone; LEFT = members who stepped out.")
+    print("Read one: agent-peer logs --thread <name>")
+
+
+def cmd_thread_rm(args):
+    """Delete one thread (a copy of its transcript is kept)."""
+    if not args.target:
+        print("Give the thread to remove: agent-peer thread rm <name>  (see: agent-peer thread list)", file=sys.stderr)
+        sys.exit(2)
+    try:
+        r = remove_thread(args.target, force=args.force)
+    except ValueError as e:
+        print(f"❌ {e}", file=sys.stderr)
+        sys.exit(1)
+    print(f"🗑  Removed thread '{r['thread']}' ({r['records']} records, {r['files']} files). Copy of the transcript: {r['backup']}")
+    if r["forced"]:
+        print("Members still polling it will recreate it empty on their next post; tell them to stop.")
+
+
 def cmd_thread(args):
     """Wait for unread messages on a shared thread, print them, exit 0 -
     mirrors cmd_wait's per-caller lock guard, pointed at shared state."""
+    if args.thread_id == "list" and not args.leave:  # reserved: not a thread name
+        cmd_thread_list(args)
+        return
+    if args.thread_id == "rm" and not args.leave:  # reserved: not a thread name
+        cmd_thread_rm(args)
+        return
     if args.interactive:
         cmd_join(args)
         return
@@ -622,7 +672,10 @@ def main():
 
     # thread - shared multi-party discussion
     p_thread = subparsers.add_parser("thread", help="Wait on a shared thread - a discussion several sessions can post into freely, not just one recipient at a time", epilog="Presence note: an indefinite wait holds active room presence only while this command keeps running - loop it continuously (see skills/<your-harness>/SKILL.md for the exact per-harness idiom).")
-    p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first")
+    p_thread.add_argument("thread_id", help="Thread name (e.g. dev-sync, arch-review) - shared by everyone who posts/waits on it, nothing to create first. `thread list` shows every thread on this machine and `thread rm <name>` deletes one (the names 'list' and 'rm' are reserved)")
+    p_thread.add_argument("target", nargs="?", help="With `thread rm`: the thread to delete")
+    p_thread.add_argument("--json", action="store_true", help="With `thread list`: print machine-readable JSON")
+    p_thread.add_argument("--force", action="store_true", help="With `thread rm`: delete even while a member is still polling it")
     p_thread.add_argument("--name", default=None, help="This participant's identity in the thread (default: $AGENT_PEER_NAME, else auto-detected from the calling harness)")
     p_thread.add_argument("--timeout", type=float, default=0, help="Timeout in seconds (0 = wait indefinitely - only safe when this call itself is looped: a finished bare call leaves you marked active with no poll behind it; a bounded timeout is just a peek)")
     p_thread.add_argument("--leave", action="store_true", help="Step out: banter stops pushing you but @mentions still knock (cursor kept - rejoin replays the backlog)")
