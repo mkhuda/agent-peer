@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.15.1
+
+- **Windows: a session's registry file no longer fails to update while another command reads it.** Updating a
+  session's status could fail, and `agent-peer list` could briefly lose a session, when two processes touched the
+  same file at once. Both sides now retry for an instant before giving up.
+- **Windows: `agent-peer send` no longer reports a failure for a message that was delivered.** A console or pipe on a
+  legacy code page could not print the status symbols and the command exited with an error after sending; it now
+  prints a placeholder instead.
+- **Held messages are no longer dropped if a session's registry file is momentarily unreadable.** A busy session's
+  waiting messages are only discarded once its session is confirmed gone.
+- **Paths under `~/.agent-peer` and `~/.claude` are built with one separator on Windows.** The background delivery
+  process no longer keeps your home folder open as its working directory.
+
 ## 0.15.0
 
 - **A busy Claude Code session is no longer interrupted by incoming messages.** When the target is in the middle

@@ -6,7 +6,7 @@ import os
 import stat
 import unittest
 
-from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import isolated_home, run_cli, skip_on_windows, spawn_cli, stop_cli, wait_until
 
 SESSION = "perm-test"
 SESSION_NO_BACKLOG = "perm-test-lock"
@@ -16,6 +16,7 @@ def _mode(path):
     return stat.S_IMODE(os.stat(path).st_mode)
 
 
+@skip_on_windows("Windows has no POSIX file modes")
 class FilePermissionTest(unittest.TestCase):
     def setUp(self):
         self._home_cm = isolated_home()

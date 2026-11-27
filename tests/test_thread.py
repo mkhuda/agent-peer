@@ -10,7 +10,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.helpers import isolated_home, run_cli
+from tests.helpers import isolated_env, isolated_home, run_cli
 
 
 def test_thread_backlog_delivered_to_a_late_joiner():
@@ -186,7 +186,7 @@ def test_concurrent_thread_appends_get_unique_sequential_seq():
 
     with isolated_home() as home:
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        env = dict(os.environ, HOME=home)
+        env = isolated_env(home)
         procs = [
             subprocess.Popen(
                 [_sys.executable, "-m", "agent_peer", "send", "--thread", "stress", f"msg {i}", "--sender", f"w{i % 3}"],

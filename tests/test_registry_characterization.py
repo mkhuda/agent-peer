@@ -10,9 +10,10 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.helpers import isolated_home, run_cli, socket_dir, spawn_cli, stop_cli, wait_until
+from tests.helpers import isolated_home, run_cli, skip_on_windows, socket_dir, spawn_cli, stop_cli, wait_until
 
 
+@skip_on_windows("relies on SIGTERM cleanup and unix socket files")
 class RegistryCharacterizationTest(unittest.TestCase):
     def setUp(self):
         ctx = isolated_home()

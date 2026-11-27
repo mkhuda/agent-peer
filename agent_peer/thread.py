@@ -754,20 +754,22 @@ def remove_thread(thread_id: str, force: bool = False) -> Dict[str, Any]:
                 if any(o.startswith(thread_id + ".") and rest.startswith(o[len(thread_id) + 1:] + ".") for o in others):
                     continue
                 doomed.append(os.path.join(directory, fname))
-        removed = 0
+        removed, blocked = 0, []
         for f in doomed:
             try:
                 os.unlink(f)
                 removed += 1
             except FileNotFoundError:
                 pass
+            except PermissionError:
+                blocked.append(f)  # Windows: a running member still holds this file open
     finally:
         compat.release_lock(lock)
     try:
         os.unlink(get_thread_lock_path(thread_id))
     except OSError:
         pass
-    return {"thread": thread_id, "records": records, "files": removed, "backup": backup, "forced": bool(live)}
+    return {"thread": thread_id, "records": records, "files": removed, "backup": backup, "forced": bool(live), "blocked": blocked}
 
 
 def read_thread_presence(thread_id: str) -> Dict[str, Any]:

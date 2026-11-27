@@ -10,11 +10,12 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import isolated_home, run_cli, skip_on_windows, spawn_cli, stop_cli, wait_until
 
 AUTO = {"AGENT_PEER_CLAUDE_MIRROR": "auto"}
 
 
+@skip_on_windows("relies on SIGTERM cleanup of the stopped listener")
 class RegistryWriterTest(unittest.TestCase):
     def setUp(self):
         ctx = isolated_home()

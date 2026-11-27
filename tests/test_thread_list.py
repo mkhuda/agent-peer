@@ -48,7 +48,7 @@ class ThreadListTest(unittest.TestCase):
 
     def test_a_running_poller_is_active_and_a_leaver_is_left(self):
         self._post("room", "alice", "hello")
-        proc = spawn_cli(["thread", "room", "--name", "watcher"], self.home)
+        proc = spawn_cli(["thread", "room", "--name", "watcher", "--mention-only"], self.home)
         self.procs.append(proc)
         self.assertTrue(wait_until(
             lambda: any(r["active"] == ["watcher"] for r in json.loads(run_cli(["thread", "list", "--json"], self.home).stdout)),

@@ -26,20 +26,29 @@ class AtomicWriteRaceTest(unittest.TestCase):
             stop = threading.Event()
 
             def writer():
-                for i in range(iterations):
-                    atomic_write_json(path, {"status": "busy" if i % 2 else "idle", "n": i})
-                stop.set()
+                try:
+                    for i in range(iterations):
+                        atomic_write_json(path, {"status": "busy" if i % 2 else "idle", "n": i})
+                except Exception as e:
+                    errors.append(f"writer {type(e).__name__}: {e}")
+                finally:
+                    stop.set()
 
             def reader():
                 while not stop.is_set():
+                    if sys.platform == "win32":
+                        time.sleep(0.002)  # a real poller pauses between reads
                     try:
                         with open(path, encoding="utf-8") as f:
                             json.load(f)
+                    except (PermissionError, FileNotFoundError) as e:
+                        if sys.platform != "win32":
+                            errors.append(type(e).__name__)  # Windows may deny an open, or lose the name, for an instant mid-replace
                     except Exception as e:
                         errors.append(f"{type(e).__name__}: {e}")
 
             t_writer = threading.Thread(target=writer)
-            readers = [threading.Thread(target=reader) for _ in range(3)]
+            readers = [threading.Thread(target=reader, daemon=True) for _ in range(3)]
             t_writer.start()
             for r in readers:
                 r.start()

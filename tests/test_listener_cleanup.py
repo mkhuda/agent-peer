@@ -8,7 +8,7 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.helpers import REPO_ROOT, isolated_env, isolated_home
+from tests.helpers import REPO_ROOT, isolated_env, isolated_home, skip_on_windows
 
 SCRIPT = """
 import json, os, sys
@@ -21,11 +21,12 @@ print(json.dumps({"link_left": os.path.islink(listener.symlink_path)}))
 """
 
 
+@skip_on_windows("uses symlinks to unix socket files")
 class ListenerCleanupTest(unittest.TestCase):
     def _cleanup(self, whose):
         with isolated_home() as home:
             done = subprocess.run([sys.executable, "-c", SCRIPT, whose], cwd=REPO_ROOT, env=isolated_env(home),
-                                  capture_output=True, text=True, timeout=15)
+                                  capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
             self.assertEqual(done.returncode, 0, done.stderr)
             return json.loads(done.stdout)["link_left"]
 

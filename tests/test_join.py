@@ -13,16 +13,16 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from tests.helpers import isolated_home, run_cli
+from tests.helpers import isolated_env, isolated_home, run_cli
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _run_py(home, script, input=None, timeout=8):
-    env = dict(os.environ, HOME=home)
+    env = isolated_env(home)
     return subprocess.run(
         [sys.executable, "-c", script],
-        input=input, cwd=REPO_ROOT, env=env, capture_output=True, text=True, timeout=timeout,
+        input=input, cwd=REPO_ROOT, env=env, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout,
     )
 
 
@@ -190,10 +190,10 @@ sys.path.insert(0, {REPO_ROOT!r})
 from agent_peer.join import run_join
 run_join('sync', 'foreman')
 """
-        env = dict(os.environ, HOME=home)
+        env = isolated_env(home)
         proc = subprocess.Popen(
             [sys.executable, "-c", script], cwd=REPO_ROOT, env=env,
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8", errors="replace",
         )
         time.sleep(0.8)  # let the poller start before the live message lands
         run_cli(["send", "--thread", "sync", "live incoming reply", "--sender", "other-agent"], home)

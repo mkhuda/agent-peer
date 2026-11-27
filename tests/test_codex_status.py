@@ -18,7 +18,7 @@ class CodexBusyStatusTest(unittest.TestCase):
     def setUp(self):
         self._cm = isolated_home()
         self.home = self._cm.__enter__()
-        self.proc = subprocess.Popen(["sleep", "60"])
+        self.proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
         sessions = os.path.join(self.home, ".claude", "sessions")
         os.makedirs(sessions)
         self._session_path = os.path.join(sessions, f"{self.proc.pid}.json")

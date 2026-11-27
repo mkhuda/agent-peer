@@ -21,7 +21,7 @@ class RegistryGuardsTest(unittest.TestCase):
 
     def _py(self, code):
         done = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, env=isolated_env(self.home),
-                              capture_output=True, text=True, timeout=30)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
         return done
 
     def test_ids_that_look_alike_get_different_files_and_stay_inside_the_directory(self):
@@ -101,7 +101,7 @@ class RegistryGuardsTest(unittest.TestCase):
             [sys.executable, "-c",
              "import time\nfrom agent_peer import registry\n"
              "with registry._registry_lock():\n    print('held', flush=True)\n    time.sleep(1.2)\n"],
-            cwd=REPO_ROOT, env=isolated_env(self.home), stdout=subprocess.PIPE, text=True)
+            cwd=REPO_ROOT, env=isolated_env(self.home), stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         self.addCleanup(holder.stdout.close)
         self.addCleanup(holder.wait)
         self.assertEqual(holder.stdout.readline().strip(), "held")
@@ -232,7 +232,7 @@ class RegistryGuardsTest(unittest.TestCase):
             [sys.executable, "-c",
              "import time\nfrom agent_peer import registry\n"
              "with registry._registry_lock():\n    print('held', flush=True)\n    time.sleep(2.0)\n"],
-            cwd=REPO_ROOT, env=isolated_env(self.home), stdout=subprocess.PIPE, text=True)
+            cwd=REPO_ROOT, env=isolated_env(self.home), stdout=subprocess.PIPE, text=True, encoding="utf-8", errors="replace")
         self.addCleanup(holder.stdout.close)
         self.addCleanup(holder.wait)
         self.assertEqual(holder.stdout.readline().strip(), "held")

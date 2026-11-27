@@ -62,7 +62,7 @@ class ThreadRmTest(unittest.TestCase):
 
     def test_refuses_while_a_member_is_polling_unless_forced(self):
         self._post("busy")
-        proc = spawn_cli(["thread", "busy", "--name", "watcher"], self.home)
+        proc = spawn_cli(["thread", "busy", "--name", "watcher", "--mention-only"], self.home)
         self.procs.append(proc)
         self.assertTrue(wait_until(
             lambda: json.loads(run_cli(["thread", "list", "--json"], self.home).stdout)[0]["active"] == ["watcher"],

@@ -11,7 +11,7 @@ from unittest import mock
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent_peer import harness_detect
-from tests.helpers import REPO_ROOT, isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import REPO_ROOT, isolated_home, run_cli, skip_on_windows, spawn_cli, stop_cli, wait_until
 
 
 class NoClaudeCreatedTest(unittest.TestCase):
@@ -32,6 +32,7 @@ class NoClaudeCreatedTest(unittest.TestCase):
                 stop_cli(proc)
 
 
+@skip_on_windows("restricts PATH to POSIX directories")
 class DetectClaudeTest(unittest.TestCase):
     def _detect(self, entries, on_path=None):
         with tempfile.TemporaryDirectory() as home:
@@ -60,7 +61,7 @@ class DetectClaudeTest(unittest.TestCase):
             os.makedirs(os.path.join(home, ".claude", "sessions"))
             env = dict(os.environ, HOME=home, PATH="/usr/bin:/bin")
             out = subprocess.run([sys.executable, "-m", "agent_peer", "setup", "--list"], cwd=REPO_ROOT, env=env,
-                                 capture_output=True, text=True).stdout
+                                 capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
             line = next(ln for ln in out.splitlines() if ln.startswith("claude"))
             self.assertIn("not detected", line)
 

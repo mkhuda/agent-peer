@@ -17,55 +17,12 @@ import threading
 import time
 import unittest
 
-from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import RecordingEndpoint, isolated_home, run_cli, skip_tests_on_windows, spawn_cli, stop_cli, wait_until
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-class DummyNativeServer:
-    """A fake native-Claude UDS endpoint: accepts connections, records raw
-    bytes. Proves a fanout push actually went out over socket transport."""
-
-    def __init__(self, sock_path):
-        self.received = []
-        self._stop = threading.Event()
-        if os.path.exists(sock_path):
-            os.unlink(sock_path)
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(sock_path)
-        self._sock.listen(5)
-        self._sock.settimeout(0.2)
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self):
-        while not self._stop.is_set():
-            try:
-                conn, _ = self._sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                return
-            with conn:
-                conn.settimeout(2)
-                chunks = []
-                try:
-                    while True:
-                        data = conn.recv(4096)
-                        if not data:
-                            break
-                        chunks.append(data)
-                except socket.timeout:
-                    pass
-                self.received.append(b"".join(chunks))
-
-    def close(self):
-        self._stop.set()
-        self._thread.join(timeout=3)
-        self._sock.close()
-
-    def text(self):
-        return b"".join(self.received).decode("utf-8", errors="replace")
+DummyNativeServer = RecordingEndpoint
 
 
 def _inbox_contents(home, name):
@@ -147,7 +104,7 @@ class ThreadPushTest(unittest.TestCase):
                     "name": name,
                     "status": status,
                     "managedByAgentPeer": False,
-                    "messagingSocketPath": sock_path,
+                    "messagingSocketPath": server.address,
                 },
                 fh,
             )
@@ -847,5 +804,17 @@ class AutoNameFixOneTest(unittest.TestCase):
         self.assertEqual(self.protocol.auto_session_name(), "agy-4242")
 
 
+skip_tests_on_windows(ThreadPushTest, (
+    "test_active_member_with_a_live_poll_is_never_knocked_however_old",
+    "test_codex_follow_all_burst_is_windowed_not_blasted", "test_codex_long_message_is_previewed_with_pointer",
+    "test_codex_mention_and_stop_bypass_the_window", "test_codex_mention_queues_up_to_depth_two_and_stop_is_never_held",
+    "test_codex_never_holds_a_post_from_a_human", "test_codex_plain_post_is_held_while_its_queue_is_not_empty",
+    "test_codex_push_is_still_delivered_when_its_listener_died", "test_codex_queue_slower_than_the_native_budget_is_still_logged",
+    "test_codex_registration_older_than_three_days_is_not_queued_to", "test_codex_unreadable_queue_falls_back_to_the_time_window",
+    "test_fanout_budget_survives_a_slow_codex_queue_delivery", "test_follow_all_does_not_affect_a_session_never_in_this_thread",
+), "the fake codex is a /bin/sh script")
+
+
 if __name__ == "__main__":
     unittest.main()
+

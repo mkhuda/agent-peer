@@ -7,13 +7,14 @@ import json
 import os
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 from typing import Dict, List, Optional, Tuple
 
 from . import compat
 from .inbox import append_inbox
-from .protocol import AGENT_PEER_DIR, SESSIONS_DIR, is_pid_alive
+from .protocol import AGENT_PEER_DIR, SESSIONS_DIR, is_pid_alive, read_text_retry
 
 OUTBOX_DIR = os.path.join(AGENT_PEER_DIR, "outbox")
 RANK = {"now": 0, "next": 1, "later": 2}
@@ -147,7 +148,7 @@ def spawn_drainer(pid) -> bool:
         subprocess.Popen(
             [sys.executable, "-m", "agent_peer.outbox", "--drain", str(pid)],
             stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-            cwd=os.path.expanduser("~"), env=env, close_fds=True, **kwargs,
+            cwd=tempfile.gettempdir(), env=env, close_fds=True, **kwargs,
         )
         return True
     except OSError:
@@ -203,12 +204,11 @@ def _discard(path: str, rec: Dict, why: str) -> None:
 def _state(pid, session_id) -> Tuple[str, str]:
     """('gone', reason) | ('busy', '') | ('free', '') from the target's own registry file."""
     try:
-        with open(os.path.join(SESSIONS_DIR, f"{pid}.json"), "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except OSError:
+        data = json.loads(read_text_retry(os.path.join(SESSIONS_DIR, f"{pid}.json")))
+    except FileNotFoundError:
         return "gone", "its session ended"
-    except ValueError:
-        return "busy", ""  # caught mid-write: look again
+    except (OSError, ValueError):
+        return "busy", ""  # locked or caught mid-write: look again
     if not is_pid_alive(pid):
         return "gone", "its session ended"
     if session_id and data.get("sessionId") and data["sessionId"] != session_id:

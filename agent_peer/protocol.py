@@ -4,15 +4,16 @@ import re
 import subprocess
 import secrets
 import hashlib
+import time
 from typing import Optional
 
 from . import compat
 from .compat import is_pid_alive, get_process_field, get_process_start_time as get_proc_start  # noqa: F401 - re-exported
 
-CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR", "~/.claude"))
+CLAUDE_CONFIG_DIR = os.path.expanduser(os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.path.expanduser("~"), ".claude"))
 SESSIONS_DIR = os.path.join(CLAUDE_CONFIG_DIR, "sessions")
 SOCKET_DIR = os.environ.get("AGENT_PEER_SOCKET_DIR") or "/tmp/cc-socks"
-AGENT_PEER_DIR = os.path.expanduser("~/.agent-peer")
+AGENT_PEER_DIR = os.path.join(os.path.expanduser("~"), ".agent-peer")
 AGENT_SESSIONS_DIR = os.path.join(AGENT_PEER_DIR, "sessions")
 INBOX_FILE = os.path.join(AGENT_PEER_DIR, "inbox.jsonl")
 INBOXES_DIR = os.path.join(AGENT_PEER_DIR, "inboxes")
@@ -20,13 +21,46 @@ CURSORS_DIR = os.path.join(AGENT_PEER_DIR, "cursors")
 LOCKS_DIR = os.path.join(AGENT_PEER_DIR, "locks")
 THREADS_DIR = os.path.join(AGENT_PEER_DIR, "threads")
 
+def retry_busy(fn, attempts: int = 40, delay: float = 0.02):
+    """Windows refuses to open or replace a file another handle holds for an instant; retry briefly there."""
+    if not compat.IS_WINDOWS:
+        return fn()
+    for i in range(attempts):
+        try:
+            return fn()
+        except PermissionError:
+            if i == attempts - 1:
+                raise
+            time.sleep(delay)
+
+
+def read_text_retry(path: str, attempts: int = 40, delay: float = 0.02) -> str:
+    """Read a file that another process may be replacing. On Windows an open can be denied, or the name briefly
+    absent, while os.replace runs; retry (a missing name only briefly, so a deleted file still fails fast)."""
+    for i in range(attempts if compat.IS_WINDOWS else 1):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
+        except (PermissionError, FileNotFoundError) as e:
+            if not compat.IS_WINDOWS or i == attempts - 1 or (isinstance(e, FileNotFoundError) and i >= 9):
+                raise
+            time.sleep(delay)
+
+
 def atomic_write_json(path: str, data) -> None:
     """Write via a temp file + os.replace() - a concurrent reader (another
     process's 'list'/'send') never sees a truncated/partial file mid-write."""
     tmp_path = f"{path}.tmp.{os.getpid()}"
     with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(data, f)
-    os.replace(tmp_path, path)
+    try:
+        retry_busy(lambda: os.replace(tmp_path, path), attempts=100)
+    except OSError:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 def ensure_dirs():
     # Only our own directories are locked down - SOCKET_DIR/SESSIONS_DIR

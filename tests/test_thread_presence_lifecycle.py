@@ -15,55 +15,12 @@ import threading
 import time
 import unittest
 
-from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import RecordingEndpoint, isolated_env, isolated_home, run_cli, spawn_cli, stop_cli, wait_until
 
 REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
-class DummyNativeServer:
-    """A fake native-Claude UDS endpoint: accepts connections, records raw
-    bytes. Proves a fanout push actually went out over socket transport."""
-
-    def __init__(self, sock_path):
-        self.received = []
-        self._stop = threading.Event()
-        if os.path.exists(sock_path):
-            os.unlink(sock_path)
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(sock_path)
-        self._sock.listen(5)
-        self._sock.settimeout(0.2)
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
-
-    def _serve(self):
-        while not self._stop.is_set():
-            try:
-                conn, _ = self._sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                return
-            with conn:
-                conn.settimeout(2)
-                chunks = []
-                try:
-                    while True:
-                        data = conn.recv(4096)
-                        if not data:
-                            break
-                        chunks.append(data)
-                except socket.timeout:
-                    pass
-                self.received.append(b"".join(chunks))
-
-    def close(self):
-        self._stop.set()
-        self._thread.join(timeout=3)
-        self._sock.close()
-
-    def text(self):
-        return b"".join(self.received).decode("utf-8", errors="replace")
+DummyNativeServer = RecordingEndpoint
 
 
 def _presence(home, thread_id):
@@ -132,7 +89,7 @@ class PresenceLifecycleTest(unittest.TestCase):
                     "name": name,
                     "status": status,
                     "managedByAgentPeer": False,
-                    "messagingSocketPath": sock_path,
+                    "messagingSocketPath": server.address,
                     "cwd": cwd,
                 },
                 fh,
@@ -187,7 +144,7 @@ class PresenceLifecycleTest(unittest.TestCase):
             f"import sys; sys.path.insert(0, {REPO_ROOT!r}); "
             "from agent_peer.join import run_join; run_join('t3', 'foreman')"
         )
-        env = dict(os.environ, HOME=self.home)
+        env = isolated_env(self.home)
         proc = subprocess.run(
             [sys.executable, "-c", script],
             cwd=REPO_ROOT,
@@ -442,7 +399,7 @@ class MentionTokenTest(unittest.TestCase):
 
 class PresenceResilienceTest(unittest.TestCase):
     def _run_script(self, home, script):
-        env = dict(os.environ, HOME=home)
+        env = isolated_env(home)
         return subprocess.run(
             [sys.executable, "-c", script],
             cwd=REPO_ROOT,

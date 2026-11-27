@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from typing import List, Dict, Optional, Tuple
 
 from . import compat
-from .protocol import AGENT_SESSIONS_DIR, LOCKS_DIR, SESSIONS_DIR, SOCKET_DIR, atomic_write_json, is_pid_alive, get_proc_start
+from .protocol import AGENT_SESSIONS_DIR, LOCKS_DIR, SESSIONS_DIR, SOCKET_DIR, atomic_write_json, is_pid_alive, get_proc_start, read_text_retry
 from .codex_queue import queue_state
 
 _json_decoder = json.JSONDecoder()
@@ -197,8 +197,7 @@ def _owned_by(json_path: str, session_id: Optional[str]) -> bool:
     if session_id is None:
         return True
     try:
-        with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f).get("sessionId") in (None, session_id)
+        return json.loads(read_text_retry(json_path)).get("sessionId") in (None, session_id)
     except Exception:
         return True
 
@@ -210,8 +209,7 @@ def update_session(copies: List[Copy], fields: Dict, session_id: Optional[str] =
         for json_path, _ in copies:
             if not os.path.exists(json_path) or not _owned_by(json_path, session_id):
                 continue
-            with open(json_path, "r", encoding="utf-8") as f:
-                meta = json.load(f)
+            meta = json.loads(read_text_retry(json_path))
             meta.update(fields)
             atomic_write_json(json_path, meta)
             updated = True
@@ -276,8 +274,7 @@ def _read_entries(directory: str, source: str) -> List[Dict]:
 
         json_path = os.path.join(directory, fname)
         try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                data = _load_json_lenient(f.read())
+            data = _load_json_lenient(read_text_retry(json_path))
         except Exception:
             continue
         if not isinstance(data, dict):
@@ -301,8 +298,7 @@ def _read_entries(directory: str, source: str) -> List[Dict]:
         peer_token = None
         if key_file_path and os.path.exists(key_file_path):
             try:
-                with open(key_file_path, "r", encoding="utf-8") as f:
-                    peer_token = json.load(f).get("peerToken")
+                peer_token = json.loads(read_text_retry(key_file_path)).get("peerToken")
             except Exception:
                 pass
 

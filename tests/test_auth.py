@@ -8,7 +8,7 @@ import socket
 import time
 import unittest
 
-from tests.helpers import isolated_home, run_cli, spawn_cli, stop_cli, wait_until
+from tests.helpers import connect_endpoint, isolated_home, run_cli, spawn_cli, stop_cli, wait_until
 
 SESSION = "auth-test"
 
@@ -32,10 +32,8 @@ def _inbox_messages(home):
 
 def _send_frames(sock_path, frames, settle=0.3):
     """Connect once and send each already-JSON-encoded frame in order."""
-    client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    client.settimeout(3)
+    client = connect_endpoint(sock_path)
     try:
-        client.connect(sock_path)
         for frame in frames:
             client.sendall((json.dumps(frame) + "\n").encode())
             time.sleep(0.05)

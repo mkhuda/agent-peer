@@ -68,7 +68,7 @@ class UnionReaderTest(unittest.TestCase):
     def _probe(self, target=None, **env):
         args = [sys.executable, "-c", PROBE] + ([target] if target else [])
         done = subprocess.run(args, cwd=REPO_ROOT, env=isolated_env(self.home, **env),
-                              capture_output=True, text=True, timeout=15)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=15)
         self.assertEqual(done.returncode, 0, done.stderr)
         return json.loads(done.stdout)
 

@@ -277,9 +277,9 @@ class CliSetupRulesTest(unittest.TestCase):
         self._home_cm.__exit__(None, None, None)
 
     def _drop_binary(self, name):
-        path = os.path.join(self.bindir, name)
+        path = os.path.join(self.bindir, name + (".cmd" if sys.platform == "win32" else ""))
         with open(path, "w") as fh:
-            fh.write("#!/bin/sh\n")
+            fh.write("@echo off\n" if sys.platform == "win32" else "#!/bin/sh\n")
         os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
         return path
 

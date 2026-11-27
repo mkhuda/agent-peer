@@ -3,12 +3,10 @@ Everything runs against a fake session registry and a fake socket inside an isol
 
 import json
 import os
-import socket
-import threading
 import unittest
 from concurrent.futures import ThreadPoolExecutor
 
-from tests.helpers import isolated_home, run_cli, wait_until
+from tests.helpers import RecordingEndpoint, isolated_home, run_cli, wait_until
 
 FAST = {
     "AGENT_PEER_OUTBOX_POLL": "0.05",
@@ -18,52 +16,31 @@ NAME = "target"
 
 
 class FakeClaude:
-    """A native-Claude registry entry whose socket records every user frame it receives."""
+    """A native-Claude registry entry whose endpoint records every user frame it receives."""
 
     def __init__(self, home, status="busy", name=NAME):
         self.home, self.name = home, name
         self.pid = os.getpid()
-        self.sock_path = os.path.join(home, f"{name}.sock")
         self.sessions = os.path.join(home, ".claude", "sessions")
         os.makedirs(self.sessions, exist_ok=True)
-        self.frames = []
-        self._stop = threading.Event()
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(self.sock_path)
-        self._sock.listen(16)
-        self._sock.settimeout(0.1)
-        self._thread = threading.Thread(target=self._serve, daemon=True)
-        self._thread.start()
+        self.endpoint = RecordingEndpoint(os.path.join(home, f"{name}.sock"))
+        self.sock_path = self.endpoint.address
         self.set_status(status)
         with open(os.path.join(self.sessions, f"{self.pid}.test.key"), "w", encoding="utf-8") as fh:
             json.dump({"peerToken": "test-token"}, fh)
 
-    def _serve(self):
-        while not self._stop.is_set():
-            try:
-                conn, _ = self._sock.accept()
-            except socket.timeout:
-                continue
-            except OSError:
-                return
-            with conn:
-                conn.settimeout(1)
-                buf = b""
-                try:
-                    while True:
-                        data = conn.recv(65536)
-                        if not data:
-                            break
-                        buf += data
-                except socket.timeout:
-                    pass
-            for line in buf.decode("utf-8", "replace").splitlines():
+    @property
+    def frames(self):
+        out = []
+        for raw in list(self.endpoint.received):
+            for line in raw.decode("utf-8", "replace").splitlines():
                 try:
                     frame = json.loads(line)
                 except ValueError:
                     continue
                 if frame.get("type") == "user":
-                    self.frames.append(frame)
+                    out.append(frame)
+        return out
 
     def set_status(self, status):
         path = os.path.join(self.sessions, f"{self.pid}.json")
@@ -80,9 +57,7 @@ class FakeClaude:
         return [f["message"]["content"] for f in self.frames]
 
     def close(self):
-        self._stop.set()
-        self._thread.join(timeout=3)
-        self._sock.close()
+        self.endpoint.close()
 
 
 def held_files(home, pid=None):
@@ -97,6 +72,8 @@ class OutboxTest(unittest.TestCase):
         self.target = FakeClaude(self.home)
 
     def tearDown(self):
+        run_cli(["outbox", NAME, "--cancel"], self.home)
+        wait_until(self.lock_gone, timeout=5)  # Windows cannot delete a lock file a drainer still holds open
         self.target.close()
         self._cm.__exit__(None, None, None)
 
@@ -113,6 +90,16 @@ class OutboxTest(unittest.TestCase):
         self.assertIn("Delivered", p.stdout)
         self.assertEqual(len(self.target.frames), 1)
         self.assertEqual(held_files(self.home), [])
+
+    def test_status_symbols_do_not_break_send_on_a_console_that_cannot_print_them(self):
+        self.target.set_status("idle")
+        p = self.send("hello", "a", env={"PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Delivered", p.stdout)
+        self.target.set_status("busy")
+        p = self.send("again", "b", env={"PYTHONUTF8": "0", "PYTHONIOENCODING": "cp1252"})
+        self.assertEqual(p.returncode, 0, p.stderr)
+        self.assertIn("Queued", p.stdout)
 
     def test_shell_status_counts_as_free(self):
         self.target.set_status("shell")

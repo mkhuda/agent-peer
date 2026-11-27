@@ -437,6 +437,8 @@ def cmd_thread_rm(args):
     print(f"🗑  Removed thread '{r['thread']}' ({r['records']} records, {r['files']} files). Copy of the transcript: {r['backup']}")
     if r["forced"]:
         print("Members still polling it will recreate it empty on their next post; tell them to stop.")
+    if r.get("blocked"):
+        print(f"{len(r['blocked'])} file(s) are still held open by a running member. Stop it, then run the same command again.")
 
 
 def cmd_thread(args):
@@ -668,7 +670,17 @@ def cmd_setup(args):
         for hid in rules_res["installed"]:
             print(f"injected rules for {hid}: {by_id[hid]['rules_target']}")
 
+def _tolerate_unencodable_output():
+    """A Windows console or pipe on a legacy code page raises on the status symbols; print a placeholder instead."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(errors="replace")
+        except (AttributeError, ValueError):
+            pass
+
+
 def main():
+    _tolerate_unencodable_output()
     parser = argparse.ArgumentParser(
         prog="agent-peer",
         description="Local IPC mesh for AI coding agents (Claude Code, Codex CLI, Antigravity, pi, opencode) - send messages and wake up any peer session, no polling"

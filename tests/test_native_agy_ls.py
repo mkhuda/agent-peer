@@ -17,7 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent_peer import native, protocol
 from agent_peer.native import agy_ls
-from tests.helpers import REPO_ROOT, isolated_env, isolated_home, run_cli, socket_dir, wait_until
+from tests.helpers import REPO_ROOT, isolated_env, isolated_home, run_cli, skip_tests_on_windows, socket_dir, wait_until
 
 CONV = "f5246d08-228f-41c8-be8a-b6449cd36584"
 TOKEN = "secret-csrf-token-value"
@@ -257,7 +257,7 @@ class SenderHookTest(AgyLsTestBase):
             " for t in ('CODEX', 'MUSE', 'PI', 'OPENCODE', 'CLAUDE', None)];"
             "print(r, 'agent_peer.native.agy_ls' in sys.modules)"
         )
-        out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True)
+        out = subprocess.run([sys.executable, "-c", code], cwd=REPO_ROOT, capture_output=True, text=True, encoding="utf-8", errors="replace")
         self.assertEqual(out.stdout.strip(), "[None, None, None, None, None, None] False", out.stderr)
 
     def test_an_agy_session_from_an_older_agent_peer_takes_the_generic_path(self):
@@ -799,6 +799,18 @@ class AgyThreadPushTest(_ListenHarness):
         self._join("zz-test-agy-t")
         self._post("@zz-test-agy-t please look")
         self.assertTrue(self._sent(1), "the push never arrived")
+
+
+skip_tests_on_windows(FallbackAndCacheTest, ("test_a_failed_send_and_a_missing_model_are_recorded_with_their_cause",), "asserts POSIX file modes")
+skip_tests_on_windows(ListenInfoTest, ("test_writes_a_private_endpoint_file_and_returns_only_non_secret_fields",), "asserts POSIX file modes")
+skip_tests_on_windows(ListenEndToEndTest, (
+    "test_registers_the_conversation_without_putting_the_token_in_the_registry",
+    "test_a_clean_exit_then_a_listen_without_a_name_restores_the_name",
+), "asserts POSIX file modes and relies on SIGTERM cleanup")
+skip_tests_on_windows(ListenerForwardTest, (
+    "test_a_dead_listener_socket_makes_the_poster_reach_agy_directly",
+    "test_a_thread_mention_is_handed_to_a_current_listener_so_the_poster_never_waits_for_agy",
+), "relies on a POSIX shell fake and a start-up budget tuned for POSIX")
 
 
 if __name__ == "__main__":

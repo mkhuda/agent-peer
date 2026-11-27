@@ -14,7 +14,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from agent_peer import harness_detect, setup_tui, update_check
-from tests.helpers import isolated_home, run_cli
+from tests.helpers import isolated_home, run_cli, skip_on_windows
 
 FAKE_BINARIES = ("agy", "codex", "muse", "pi", "opencode", "claude")
 
@@ -33,9 +33,9 @@ class DetectionTest(unittest.TestCase):
         self._home_cm.__exit__(None, None, None)
 
     def _drop_binary(self, name):
-        path = os.path.join(self.bindir, name)
+        path = os.path.join(self.bindir, name + (".cmd" if sys.platform == "win32" else ""))
         with open(path, "w") as fh:
-            fh.write("#!/bin/sh\n")
+            fh.write("@echo off\n" if sys.platform == "win32" else "#!/bin/sh\n")
         os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
         return path
 
@@ -49,7 +49,7 @@ class DetectionTest(unittest.TestCase):
         os.makedirs(os.path.join(self.home, ".codex"))
         by_id = {e["id"]: e for e in harness_detect.detect_all(self.home)}
         self.assertTrue(by_id["agy"]["installed"])
-        self.assertIn("bin/agy", by_id["agy"]["evidence"])
+        self.assertIn(os.path.join("bin", "agy"), os.path.normpath(by_id["agy"]["evidence"]))
         self.assertTrue(by_id["codex"]["installed"])
         self.assertIn(".codex", by_id["codex"]["evidence"])
         self.assertFalse(by_id["muse"]["installed"])
@@ -178,9 +178,9 @@ class SetupCliTest(unittest.TestCase):
         self.bindir = os.path.join(self.home, "bin")
         os.makedirs(self.bindir)
         for name in FAKE_BINARIES:
-            path = os.path.join(self.bindir, name)
+            path = os.path.join(self.bindir, name + (".cmd" if sys.platform == "win32" else ""))
             with open(path, "w") as fh:
-                fh.write("#!/bin/sh\n")
+                fh.write("@echo off\n" if sys.platform == "win32" else "#!/bin/sh\n")
             os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
         os.environ["PATH"] = self.bindir
 
@@ -244,6 +244,7 @@ class SetupCliTest(unittest.TestCase):
             self.assertFalse(os.path.isfile(harness_detect.target_path(hid, self.home)))
             self.assertFalse(os.path.isfile(harness_detect.rules_target_path(hid, self.home)))
 
+    @skip_on_windows("the curses module does not exist on Windows")
     def test_pick_harnesses_keyboard_interrupt_returns_none_false(self):
         from unittest.mock import patch
         with patch("sys.stdin.isatty", return_value=True), patch("sys.stdout.isatty", return_value=True):

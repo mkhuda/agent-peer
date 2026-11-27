@@ -8,6 +8,12 @@ the process instead of returning None because ISIG was left enabled (the
 kernel intercepted it as a real SIGINT instead of delivering byte 0x03)."""
 
 import os
+import sys
+import unittest
+
+if sys.platform == "win32":
+    raise unittest.SkipTest("needs a POSIX pseudo-terminal")
+
 import pty
 import select
 import signal
