@@ -26,7 +26,9 @@ Before finalizing any response, verify:
 ```bash
 agent-peer list                          # discover reachable sessions and their names
 agent-peer list --cwd <substring>        # narrow to sessions in one project
-agent-peer send <peer> "message"         # send instantly, by name or PID
+agent-peer send <peer> "message"         # by name or PID; held until a busy Claude peer is free
+agent-peer send --now <peer> "message"   # interrupt a busy peer instead (a "[stop]" message always does)
+agent-peer outbox [<peer>]               # what is held for busy peers (--flush to deliver, --cancel to drop)
 agent-peer prune                         # remove dead session registrations (confirmed-dead PIDs only)
 ```
 

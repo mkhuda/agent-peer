@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.15.0
+
+- **A busy Claude Code session is no longer interrupted by incoming messages.** When the target is in the middle
+  of a turn, `agent-peer send` (and thread mentions) now hold the message and deliver it as soon as the session is
+  free. Everything that piled up from several senders arrives as one message, highest priority first and oldest
+  first within a priority, each part keeping its sender and send time. A `[stop]` message, or `--now`, is still
+  delivered at once. A message held for six hours, or for a session that has ended, is dropped and its sender is
+  told through its inbox.
+- **`agent-peer outbox` shows what is held.** `agent-peer outbox` lists every held message, `outbox <name> --flush`
+  delivers one session's now and `--cancel` drops them. `agent-peer list` marks sessions that have messages waiting.
+
 ## 0.14.0
 
 - **`agent-peer thread list` shows every thread on the machine.** One line per thread: how many posts it has, when

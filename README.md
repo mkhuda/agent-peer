@@ -130,6 +130,11 @@ Filter to one project with `--cwd <substring>`, e.g. `agent-peer list --cwd my-a
 agent-peer send my-app-fe "review the auth middleware diff when you're free"
 agent-peer send agy-33402 "[stop] hold off on that migration, see docs/" --priority now
 ```
+A Claude Code session that is in the middle of a turn (`busy`) is not interrupted: the message is held and goes out,
+together with anything else waiting for it, once the session is free. A `[stop]` message, or `--now`, is
+delivered at once. `agent-peer outbox` lists what is held; `agent-peer outbox <name> --flush` delivers it now and
+`--cancel` drops it.
+
 Add `--await-reply [seconds]` to block the same call for the target's reply
 instead of a separate `wait` — closes the race where a fast reply arrives
 before the target re-arms its own `wait`. Bare flag waits indefinitely, a

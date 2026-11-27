@@ -7,7 +7,7 @@ from .registry import resolve_session
 from .protocol import format_auth_frame, format_user_frame
 from .inbox import append_inbox
 from .native import get_native
-from . import compat
+from . import compat, outbox
 
 def _resolve_sender_cwd(from_name: str):
     """Best-effort: the sender's own registered cwd, purely informational -
@@ -140,13 +140,43 @@ def _try_native(session: Dict, content: str, from_name: str, from_cwd, priority:
         return None
 
 
+def write_frames(sock_path: str, peer_token: str, wire_content: str, from_name: str, from_cwd, priority: str,
+                 session: Dict, timeout: float) -> float:
+    """Auth frame then user frame over the target's socket; returns elapsed ms."""
+    is_native_claude = not session.get("managedByAgentPeer")
+    auth_frame = format_auth_frame(peer_token)
+    user_frame = format_user_frame(
+        content=wire_content,
+        from_name=from_name,
+        # Only our own listener.py-managed targets get the extra field: a real
+        # native Claude Code binary's tolerance for it is unverified.
+        from_cwd=from_cwd if not is_native_claude else None,
+        priority=priority,
+        to_name=session.get("name"),
+        to_pid=session.get("pid")
+    )
+
+    client = compat.connect(sock_path, timeout=timeout)
+
+    t0 = time.time()
+    try:
+        client.sendall(auth_frame.encode("utf-8"))
+        time.sleep(0.04) # brief yield between frames
+        client.sendall(user_frame.encode("utf-8"))
+        time.sleep(0.12) # brief pause to let target process before close
+    finally:
+        client.close()
+    return (time.time() - t0) * 1000
+
+
 def send_message(
     target: str,
     content: str,
     priority: str = "now",
     from_name: str = "agent",
     timeout: float = 5.0,
-    native: bool = True
+    native: bool = True,
+    queue: bool = True
 ) -> Dict[str, Any]:
     """
     Send real-time peer message to target session.
@@ -166,6 +196,15 @@ def send_message(
     if session.get("agentType") == "CODEX" and codex_thread_id:
         return _send_via_codex_queue(session, codex_thread_id, content, from_name, from_cwd, priority)
 
+    if (queue and not session.get("managedByAgentPeer") and str(session.get("agentType") or "").upper() == "CLAUDE"
+            and outbox.is_busy(session) and not outbox.bypasses(content)):
+        held = outbox.enqueue(session, content, from_name, from_cwd, priority)
+        return {
+            "success": True, "queued": True, "queue_id": held["id"], "queue_position": held["position"],
+            "target_pid": session["pid"], "target_name": session.get("name"), "target_socket": sock_path,
+            "elapsed_ms": 0, "priority": priority, "from": from_name, "message": content,
+        }
+
     delivered = _try_native(session, content, from_name, from_cwd, priority) if native else None
     if delivered is not None:
         return delivered
@@ -173,31 +212,7 @@ def send_message(
     is_native_claude = not session.get("managedByAgentPeer")
     wire_content = _with_sender_header(content, from_name, from_cwd, time.strftime("%H:%M:%S")) if is_native_claude else content
 
-    auth_frame = format_auth_frame(peer_token)
-    user_frame = format_user_frame(
-        content=wire_content,
-        from_name=from_name,
-        # Only include the extra field for our own listener.py-managed
-        # targets - a real native Claude Code recipient parses this frame
-        # with its own binary, whose schema tolerance is unverified.
-        from_cwd=from_cwd if not is_native_claude else None,
-        priority=priority,
-        to_name=session.get("name"),
-        to_pid=session.get("pid")
-    )
-
-    client = compat.connect(sock_path, timeout=timeout)
-
-    t0 = time.time()
-    try:
-        client.sendall(auth_frame.encode("utf-8"))
-        time.sleep(0.04) # brief yield between frames
-        client.sendall(user_frame.encode("utf-8"))
-        time.sleep(0.12) # brief pause to let target process before close
-    finally:
-        client.close()
-
-    elapsed_ms = (time.time() - t0) * 1000
+    elapsed_ms = write_frames(sock_path, peer_token, wire_content, from_name, from_cwd, priority, session, timeout)
 
     if is_native_claude:
         # Real native Claude Code session - its own binary receives this over

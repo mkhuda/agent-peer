@@ -709,7 +709,7 @@ class ThreadPushTest(unittest.TestCase):
 
     def test_busy_active_silent_left_knock_rings(self):
         # Busy no longer gates anything for actives (they are poll-only);
-        # the knock path is left + mention, regardless of busy status.
+        # the knock path is left + mention; a busy target gets it when it is free.
         server = self._native_session("beth", status="busy")
         try:
             self._touch_presence("t1", "beth")
@@ -722,9 +722,17 @@ class ThreadPushTest(unittest.TestCase):
             time.sleep(1)
             self.assertEqual(server.text(), "", "@beth-2 must not knock a left beth")
             self._post("t1", "bob", "@beth urgent")
+            time.sleep(1)
+            self.assertEqual(server.text(), "", "a busy session is not interrupted: the knock is held")
+            path = os.path.join(self.home, ".claude", "sessions", f"{os.getpid()}.json")
+            with open(path, encoding="utf-8") as fh:
+                meta = json.load(fh)
+            meta["status"] = "idle"
+            with open(path, "w", encoding="utf-8") as fh:
+                json.dump(meta, fh)
             self.assertTrue(
-                wait_until(lambda: "@beth urgent" in server.text(), timeout=5),
-                "left + mention must knock even when busy",
+                wait_until(lambda: "@beth urgent" in server.text(), timeout=10),
+                "left + mention must knock once the busy session is free",
             )
         finally:
             server.close()

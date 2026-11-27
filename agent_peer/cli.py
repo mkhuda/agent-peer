@@ -9,6 +9,7 @@ from . import compat
 
 from .registry import get_active_sessions, is_superseded, remove_session, resolve_session, update_session
 from .sender import send_message
+from . import outbox
 from .listener import PeerListener
 from .inbox import read_inbox, clear_inbox, wait_for_message, wait_for_reply
 from .native import get_native
@@ -38,6 +39,8 @@ def cmd_list(args):
 
     print(f"{'PID':<8} {'SESSION NAME':<24} {'ENGINE':<8} {'STATUS':<8} {'ALIVE':<6} {'SOCKET':<28} {'CWD'}")
     print("-" * 110)
+    outbox.revive()
+    held = outbox.pending_counts()
     for s in sessions:
         pid = str(s.get("pid", ""))
         name = s.get("name") or "(untitled)"
@@ -53,6 +56,8 @@ def cmd_list(args):
         if len(cwd) > 30:
             cwd = "..." + cwd[-27:]
         queued = f"  [{s['queued']} unread, oldest {_short_age(s.get('queuedOldestAgeS', 0))}]" if s.get("queued") else ""
+        if held.get(s.get("pid")):
+            queued += f"  [{held[s['pid']]} held, waiting for it to be free]"
         print(f"{pid:<8} {name:<24} {engine:<8} {status:<8} {alive:<6} {sock:<28} {cwd}{queued}")
     print(f"\nTotal: {len(sessions)} sessions")
 
@@ -157,6 +162,58 @@ def cmd_codex_queue(args):
     print(f"{label}: removed {len(items)} waiting message(s). Copy saved to {path}")
 
 
+def cmd_outbox(args):
+    """Messages held for busy Claude sessions: list, deliver now, or cancel."""
+    if args.target:
+        try:
+            session, _, _ = resolve_session(args.target)
+            pids = {session["pid"]: session.get("name") or str(session["pid"])}
+        except ValueError:
+            if not args.target.isdigit():
+                print(f"❌ {args.target}: no such session.", file=sys.stderr)
+                sys.exit(1)
+            pids = {int(args.target): args.target}
+    else:
+        if args.flush or args.cancel:
+            print("❌ --flush and --cancel need a target: agent-peer outbox <name-or-pid> --flush", file=sys.stderr)
+            sys.exit(2)
+        names = {s.get("pid"): s.get("name") for s in get_active_sessions()}
+        pids = {pid: names.get(pid) or str(pid) for pid in outbox.pending_counts()}
+    if args.cancel:
+        for pid, name in pids.items():
+            n = outbox.cancel(pid, args.id)
+            print(f"{name}: cancelled {n} held message(s).")
+        return
+    if args.flush:
+        for pid, name in pids.items():
+            before = len(outbox.describe(pid))
+            outbox.request_flush(pid)
+            done = wait_until_empty(pid, 8.0)
+            left = len(outbox.describe(pid))
+            print(f"{name}: delivered {before - left} of {before} held message(s)." + ("" if done else f" {left} still waiting."))
+        return
+    shown = False
+    for pid, name in pids.items():
+        rows = outbox.describe(pid)
+        if not rows:
+            continue
+        shown = True
+        print(f"{name} (PID {pid}): {len(rows)} held")
+        for r in rows:
+            print(f"  {r['id']}  from {r['from']:<18} {r['priority']:<6} {_short_age(int(r['age_s'])):>6} ago  {r['text']}")
+    if not shown:
+        print("Nothing is held.")
+
+
+def wait_until_empty(pid, timeout: float) -> bool:
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not outbox.describe(pid):
+            return True
+        time.sleep(0.1)
+    return False
+
+
 def cmd_send(args):
     sender = args.sender or os.environ.get("AGENT_PEER_NAME") or auto_session_name()
 
@@ -182,13 +239,18 @@ def cmd_send(args):
             target=args.target,
             content=args.message,
             priority=args.priority,
-            from_name=sender
+            from_name=sender,
+            queue=not args.now
         )
-        print(f"✅ Delivered in {res['elapsed_ms']}ms to {res['target_name']} (PID {res['target_pid']})")
-        print(f"   Socket:   {res['target_socket']}")
-        print(f"   Priority: {res['priority']}")
-        print(f"   From:     {res['from']}")
-        print(f"   Message:  {res['message']}")
+        if res.get("queued"):
+            print(f"⏳ Queued for {res['target_name']} (PID {res['target_pid']}): it is busy, so this goes out when it is free (position {res['queue_position']}).")
+            print(f"   Inspect: agent-peer outbox {res['target_name']}   Interrupt instead: add --now")
+        else:
+            print(f"✅ Delivered in {res['elapsed_ms']}ms to {res['target_name']} (PID {res['target_pid']})")
+            print(f"   Socket:   {res['target_socket']}")
+            print(f"   Priority: {res['priority']}")
+            print(f"   From:     {res['from']}")
+            print(f"   Message:  {res['message']}")
     except Exception as e:
         print(f"❌ Failed to send: {e}", file=sys.stderr)
         sys.exit(1)
@@ -630,11 +692,19 @@ def main():
     p_cq.add_argument("--purge", action="store_true", help="Delete every waiting message; a copy is saved under ~/.agent-peer/purged/")
     p_cq.set_defaults(func=cmd_codex_queue)
 
+    p_ob = subparsers.add_parser("outbox", help="Messages held for busy Claude sessions: list them, deliver them now, or cancel them")
+    p_ob.add_argument("target", nargs="?", help="Session name or PID; omit to list every held message")
+    p_ob.add_argument("--flush", action="store_true", help="Deliver the held messages now, even though the session is busy")
+    p_ob.add_argument("--cancel", action="store_true", help="Drop the held messages without delivering them")
+    p_ob.add_argument("--id", default=None, help="With --cancel: only the message with this id")
+    p_ob.set_defaults(func=cmd_outbox)
+
     # send
     p_send = subparsers.add_parser("send", help="Send a real-time message to a session")
     p_send.add_argument("target", nargs="?", default=None, help="Target session name or PID (e.g. projects-00, fe, 22748) - omit when using --thread")
     p_send.add_argument("message", help="Message text to send")
     p_send.add_argument("--priority", choices=["now", "next", "later"], default="now", help="Delivery priority (default: now)")
+    p_send.add_argument("--now", action="store_true", help="Deliver at once even if the target is a busy Claude session (default: hold the message until it is free; a message starting with [stop] is never held)")
     p_send.add_argument("--sender", default=None, help="Sender identity name (default: $AGENT_PEER_NAME, else auto-detected from the calling harness, e.g. agy-<pid>, pi-<pid>)")
     p_send.add_argument("--await-reply", nargs="?", const=0.0, default=None, type=float, metavar="SECONDS", help="After delivering, block until the target replies (first message from them past send-time, exit 0) or the timeout lapses (exit 1). Bare flag waits indefinitely; does not consume the read cursor.")
     p_send.add_argument("--thread", default=None, metavar="ID", help="Post to a shared thread instead of one recipient - every participant running 'agent-peer thread <ID>' sees it. No target positional with this flag.")
